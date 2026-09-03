@@ -888,35 +888,52 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       .filter(s => state.checklist[s.id]?.paid)
       .map(s => {
         const c = state.checklist[s.id];
+        const nt = computeNextTerm(s, state.calendar);
         return {
           day: DAY_FULL[s.day] || s.day,
           name: s.name,
+          age: s.age ?? "-",
+          teacher: s.teacher || "-",
+          time: s.time || "-",
           method: c.method || "카드",
           amount: tuitionFor(s) || 0,
           paidDate: c.paidDate || "",
+          memo: c.memo || "",
+          nextTerm: nt ? `${fmtShort(nt.termStart)}~${fmtShort(nt.termEnd)}` : "-",
         };
       });
     allNewStudentsFlat().filter(r => r.paid).forEach(r => {
       rows.push({
         day: `신규(${DAY_FULL[r._day] || r._day})`,
         name: r.name || "",
+        age: r.age || "-",
+        teacher: "-",
+        time: "-",
         method: r.method || "카드",
         amount: Number(r.amount) || 0,
         paidDate: r.paidDate || "",
+        memo: r.memo || "",
+        nextTerm: "-",
       });
     });
     allOtherPayersFlat().filter(r => r.paid).forEach(r => {
       rows.push({
         day: `기타(${DAY_FULL[r._day] || r._day})`,
         name: r.name || "",
+        age: r.age || "-",
+        teacher: "-",
+        time: "-",
         method: r.method || "카드",
         amount: Number(r.amount) || 0,
         paidDate: r.paidDate || "",
+        memo: r.memo || "",
+        nextTerm: "-",
       });
     });
-    let csv = "\uFEFF요일,이름,결제방법,금액,체크일\n";
+    let csv = "\uFEFF체크일,요일,이름,나이,교사,수업시간,금액,결제방법,메모,다음텀\n";
     rows.forEach(r => {
-      csv += `${r.day},${r.name},${r.method},${r.amount},${r.paidDate}\n`;
+      const memoSafe = String(r.memo || "").replace(/"/g, '""');
+      csv += `${r.paidDate},${r.day},${r.name},${r.age},${r.teacher},${r.time},${r.amount},${r.method},"${memoSafe}",${r.nextTerm}\n`;
     });
     const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
