@@ -727,7 +727,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     smsSendNow: false,
   };
 
-  const SMS_SETTINGS_KEY = "academy_sms_settings_v1";
+  const SMS_SETTINGS_KEY = "academy_sms_settings_v2";
   const SMS_TEMPLATE_KEY = "academy_sms_template_v4";
   const DEFAULT_TEMPLATE = `안녕하세요? {센터명}입니다. 
 
@@ -741,22 +741,18 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
 
 감사합니다.`;
 
-  const DEFAULT_RELAY_URL = "https://sms-relay-527430354151.asia-northeast3.run.app";
   function loadSmsSettings() {
     try {
       const raw = localStorage.getItem(SMS_SETTINGS_KEY);
       const parsed = raw ? JSON.parse(raw) : {};
-      return {
-        apiKey: parsed.apiKey || "", userId: parsed.userId || "", sender: parsed.sender || "",
-        relayUrl: parsed.relayUrl !== undefined ? parsed.relayUrl : DEFAULT_RELAY_URL,
-        useRelay: parsed.useRelay !== undefined ? parsed.useRelay : true,
-      };
+      return { apiKey: parsed.apiKey || "", userId: parsed.userId || "", senderNumber: parsed.senderNumber || "" };
     } catch (e) {
-      return { apiKey: "", userId: "", sender: "", relayUrl: DEFAULT_RELAY_URL, useRelay: true };
+      return { apiKey: "", userId: "", senderNumber: "" };
     }
   }
   function saveSmsSettings(s) {
     try { localStorage.setItem(SMS_SETTINGS_KEY, JSON.stringify(s)); } catch (e) {}
+    if (fbCenter) centerConfigRef().set({ smsSettings: s }, { merge: true }).catch(() => {});
   }
   function loadSmsTemplate() {
     try {
@@ -1222,82 +1218,46 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     reader.readAsText(file);
   }
 
-  const RESERVED_SMS_KEY = "academy_reserved_sms_v1";
-  function loadReservedSms() {
-    try { return JSON.parse(localStorage.getItem(RESERVED_SMS_KEY) || "[]"); } catch (e) { return []; }
-  }
-  function saveReservedSms(list) {
-    try { localStorage.setItem(RESERVED_SMS_KEY, JSON.stringify(list)); } catch (e) {}
-  }
-  function logReservedSms(record) {
-    const list = loadReservedSms();
-    list.push({ ...record, id: `${record.mid}_${Date.now()}`, cancelled: false, createdAt: fmt(new Date()) });
-    saveReservedSms(list);
-  }
+  // 예약 문자 목록: 이제 알리고 mid가 아니라 Firestore smsQueue 문서를 그대로 실시간 구독
+  function smsQueueRef() { return fbDb.collection("smsQueue"); }
 
-  async function sendOneSms(entry, message, reserveDate, reserveTime, title) {
+  async function enqueueSms(entry, message, reserveDate, reserveTime, title) {
     const phone = (entry.phone || "").replace(/[^0-9]/g, "");
     if (!phone) return { ok: false, error: "연락처 없음" };
-    const params = new URLSearchParams();
-    params.set("key", state.smsSettings.apiKey);
-    params.set("user_id", state.smsSettings.userId);
-    params.set("sender", state.smsSettings.sender);
-    params.set("receiver", phone);
-    params.set("msg", message);
-    // 알리고는 장문(LMS/MMS)일 때 제목(title)이 필수라 항상 같이 보냄 (단문이면 알리고 쪽에서 무시됨)
-    params.set("title", (title && title.trim() ? title.trim() : "결제 안내").slice(0, 40));
-    params.set("testmode_yn", state.smsTestMode ? "Y" : "N");
-    if (reserveDate) {
-      params.set("rdate", reserveDate.replace(/-/g, ""));
-      params.set("rtime", (reserveTime || "19:00").replace(":", ""));
-    }
-    const useRelay = state.smsSettings.useRelay && state.smsSettings.relayUrl;
-    const targetUrl = useRelay ? state.smsSettings.relayUrl.replace(/\/$/, "") : "https://apis.aligo.in/send/";
+    if (!fbCenter) return { ok: false, error: "로그인이 필요해요" };
+    const scheduleAt = reserveDate
+      ? new Date(`${reserveDate}T${(reserveTime || "19:00")}:00+09:00`).toISOString()
+      : null;
     try {
-      const res = await fetch(targetUrl, { method: "POST", body: params });
-      const data = await res.json().catch(() => null);
-      if (data && String(data.result_code) === "1") {
-        const mid = data.mid || data.msg_id
-          || (data.info && data.info.mid)
-          || (Array.isArray(data.info) && data.info[0] && data.info[0].mid)
-          || null;
-        if (reserveDate && mid && !state.smsTestMode) {
-          logReservedSms({
-            mid, name: entry.name, phone,
-            reserveDate, reserveTime: reserveTime || "19:00",
-            message: message.slice(0, 60),
-          });
-        }
-        return { ok: true, info: data.message || "발송 요청 완료", mid };
-      }
-      return { ok: false, error: data ? (data.message || "발송 실패") : "응답을 읽을 수 없어요" };
+      await smsQueueRef().add({
+        center: fbCenter,
+        status: "pending",
+        testMode: !!state.smsTestMode,
+        scheduleAt,
+        createdAt: Date.now(),
+        createdBy: (fbAuth.currentUser && fbAuth.currentUser.email) || "",
+        recipients: [{
+          phone, name: entry.name, message,
+          subject: (title && title.trim() ? title.trim() : "결제 안내").slice(0, 40),
+        }],
+      });
+      return { ok: true, info: scheduleAt ? "예약 등록 완료" : "발송 대기열에 등록 완료" };
     } catch (e) {
-      return { ok: false, error: "CORS_OR_NETWORK" };
+      return { ok: false, error: "저장 실패 (인터넷/권한을 확인해주세요)" };
     }
   }
 
-  async function cancelReservedSms(mid) {
-    if (!state.smsSettings.apiKey || !state.smsSettings.userId) {
-      return { ok: false, error: "문자 설정(API Key/User ID)이 필요해요." };
-    }
-    const params = new URLSearchParams();
-    params.set("key", state.smsSettings.apiKey);
-    params.set("user_id", state.smsSettings.userId);
-    params.set("mid", mid);
+  async function cancelReservedSms(docId) {
     try {
-      const res = await fetch("https://apis.aligo.in/cancel/", { method: "POST", body: params });
-      const data = await res.json().catch(() => null);
-      if (data && String(data.result_code) === "1") {
-        return { ok: true };
-      }
-      return { ok: false, error: data ? (data.message || "취소 실패") : "응답을 읽을 수 없어요" };
+      await smsQueueRef().doc(docId).update({ status: "cancelled" });
+      return { ok: true };
     } catch (e) {
-      return { ok: false, error: "CORS_OR_NETWORK" };
+      return { ok: false, error: "취소 실패" };
     }
   }
 
   async function handleSmsSend() {
-    if (!state.smsSettings.apiKey || !state.smsSettings.userId || !state.smsSettings.sender) {
+    if (!state.smsSettings.apiKey || !state.smsSettings.userId || !state.smsSettings.senderNumber) {
       state.message = "문자 설정(API Key / User ID / 발신번호)을 먼저 입력하고 저장해 주세요.";
       state.messageType = "error";
       render();
@@ -1316,7 +1276,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     let okCount = 0, failCount = 0;
     for (const s of list) {
       const msg = fillTemplate(state.smsTemplate, s);
-      const result = await sendOneSms(s, msg, state.smsSendNow ? "" : state.smsReserveDate, state.smsReserveTime, state.smsTitle);
+      const result = await enqueueSms(s, msg, state.smsSendNow ? "" : state.smsReserveDate, state.smsReserveTime, state.smsTitle);
       state.smsResults[s.id] = result;
       if (result.ok) okCount += 1; else failCount += 1;
       render();
@@ -1327,7 +1287,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   }
 
   async function handleAutoSmsSend() {
-    if (!state.smsSettings.apiKey || !state.smsSettings.userId || !state.smsSettings.sender) {
+    if (!state.smsSettings.apiKey || !state.smsSettings.userId || !state.smsSettings.senderNumber) {
       state.message = "문자 설정(API Key / User ID / 발신번호)을 먼저 입력하고 저장해 주세요.";
       state.messageType = "error";
       state.autoSmsOpen = false;
@@ -1346,7 +1306,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     for (const s of list) {
       const msg = fillTemplate(state.autoSmsTemplate, s);
       const reserve = defaultReserveForDay(s.day);
-      const result = await sendOneSms(s, msg, reserve.date, reserve.time, state.autoSmsTitle);
+      const result = await enqueueSms(s, msg, reserve.date, reserve.time, state.autoSmsTitle);
       state.autoSmsResults[s.id] = result;
       if (result.ok) okCount += 1; else failCount += 1;
       renderAutoSmsBox();
@@ -2233,15 +2193,10 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         <div class="cal-add-row" style="flex-direction: column; align-items: stretch; gap: 10px;">
           <input id="stApiKey" class="sms-input" placeholder="API Key" value="${escapeHtml(set.apiKey)}" />
           <input id="stUserId" class="sms-input" placeholder="User ID" value="${escapeHtml(set.userId)}" />
-          <input id="stSender" class="sms-input" placeholder="발신번호 (숫자만)" value="${escapeHtml(set.sender)}" />
-          <label class="sms-testmode">
-            <input type="checkbox" id="stUseRelay" ${set.useRelay ? "checked" : ""} />
-            중계 서버를 통해 발송 (등원 매니저 relay 재사용, IP 문제 해결)
-          </label>
-          <input id="stRelayUrl" class="sms-input" placeholder="중계 서버 주소" value="${escapeHtml(set.relayUrl)}" ${set.useRelay ? "" : "disabled"} />
+          <input id="stSenderNumber" class="sms-input" placeholder="발신번호 (숫자만)" value="${escapeHtml(set.senderNumber)}" />
           <button class="btn primary" id="stSaveBtn">저장</button>
         </div>
-        <div class="sms-hint">알리고 API는 등록된 서버 IP에서만 호출을 허용해서, 브라우저에서 직접 부르면 막혀요. "중계 서버" 옵션을 켜두면 등원 매니저의 고정 IP 서버를 거쳐서 보내요. 이 정보는 이 컴퓨터의 브라우저에만 저장돼요.</div>
+        <div class="sms-hint">문자는 이제 Firestore 대기열에 등록되고, 1분마다 자동으로 실제 발송 처리돼요. 이 설정은 이 원(${escapeHtml(fbCenter || "")}) 계정으로 공유돼요.</div>
       </div>
 
       <div class="sms-section" style="border-top: 1px solid var(--line); padding-top: 14px;">
@@ -2268,18 +2223,11 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       state.smsSettings = {
         apiKey: document.getElementById("stApiKey").value.trim(),
         userId: document.getElementById("stUserId").value.trim(),
-        sender: document.getElementById("stSender").value.trim(),
-        useRelay: document.getElementById("stUseRelay").checked,
-        relayUrl: document.getElementById("stRelayUrl").value.trim(),
+        senderNumber: document.getElementById("stSenderNumber").value.trim(),
       };
       saveSmsSettings(state.smsSettings);
       showToast("✅ 문자 발송 설정을 저장했어요");
       renderSmsSettingsBox();
-    });
-    const stUseRelay = document.getElementById("stUseRelay");
-    if (stUseRelay) stUseRelay.addEventListener("change", () => {
-      const urlInput = document.getElementById("stRelayUrl");
-      if (urlInput) urlInput.disabled = !stUseRelay.checked;
     });
     const tsSaveBtn = document.getElementById("tsSaveBtn");
     if (tsSaveBtn) tsSaveBtn.addEventListener("click", () => {
@@ -2302,62 +2250,71 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   function renderReservedSmsBox() {
     const box = document.getElementById("reservedSmsBox");
     if (!box) return;
-    const list = loadReservedSms().filter(r => !r.cancelled).sort((a, b) => {
-      const da = `${a.reserveDate} ${a.reserveTime}`, db = `${b.reserveDate} ${b.reserveTime}`;
-      return da.localeCompare(db);
-    });
-    const now = new Date();
-    let html = `
+    box.innerHTML = `
       <div class="capture-actions" style="justify-content: space-between; margin-bottom: 4px;">
         <div class="sms-title">📋 예약 문자 관리</div>
         <button class="btn ghost" id="reservedSmsCloseBtn">닫기</button>
       </div>
-      <div class="sms-hint">알리고는 발송 5분 전까지만 취소가 가능해요. 테스트 모드로 보낸 건은 실제 예약이 아니라 여기 안 쌓여요.</div>
-      <div class="cal-list" style="max-height:320px;">
+      <div class="sms-hint">1분마다 자동으로 대기열을 확인해서 예약 시각이 된 문자를 발송해요. 발송 전까지는 취소할 수 있어요.</div>
+      <div class="cal-list" id="reservedSmsList" style="max-height:320px;"><div class="sms-hint">불러오는 중…</div></div>
     `;
-    if (list.length === 0) {
-      html += `<div class="sms-hint">예약된 문자가 없어요.</div>`;
-    } else {
-      list.forEach(r => {
-        const dt = new Date(`${r.reserveDate}T${(r.reserveTime || "00:00")}:00`);
-        const isPast = dt.getTime() < now.getTime();
-        html += `
-          <div class="reserved-item">
-            <span class="r-name">${escapeHtml(r.name)}</span>
-            <span class="r-when">${escapeHtml(r.reserveDate)} ${escapeHtml(r.reserveTime)}</span>
-            <span class="r-msg">${escapeHtml(r.message || "")}</span>
-            ${isPast
-              ? `<span class="r-past">발송 시각 지남</span>`
-              : `<button class="btn ghost" data-cancel-mid="${escapeHtml(r.mid)}">취소</button>`}
-          </div>
-        `;
-      });
-    }
-    html += `</div>`;
-    box.innerHTML = html;
-
     const closeBtn = document.getElementById("reservedSmsCloseBtn");
     if (closeBtn) closeBtn.addEventListener("click", () => {
       document.getElementById("reservedSmsModal").classList.remove("open");
     });
-    document.querySelectorAll("[data-cancel-mid]").forEach(btn => {
-      btn.addEventListener("click", async () => {
-        const mid = btn.dataset.cancelMid;
-        btn.disabled = true;
-        btn.textContent = "취소 중…";
-        const result = await cancelReservedSms(mid);
-        if (result.ok) {
-          const all = loadReservedSms();
-          const rec = all.find(r => r.mid === mid);
-          if (rec) rec.cancelled = true;
-          saveReservedSms(all);
-          showToast("✅ 예약 문자를 취소했어요");
-        } else {
-          showToast(`⚠️ 취소 실패: ${result.error}`);
+
+    if (!fbCenter) return;
+    smsQueueRef().where("center", "==", fbCenter).where("status", "==", "pending")
+      .get().then(snap => {
+        const listEl = document.getElementById("reservedSmsList");
+        if (!listEl) return;
+        const items = [];
+        snap.forEach(doc => {
+          const data = doc.data();
+          (data.recipients || []).forEach(r => {
+            items.push({ id: doc.id, name: r.name, message: r.message, scheduleAt: data.scheduleAt });
+          });
+        });
+        items.sort((a, b) => (a.scheduleAt || "").localeCompare(b.scheduleAt || ""));
+        if (items.length === 0) {
+          listEl.innerHTML = `<div class="sms-hint">예약된 문자가 없어요.</div>`;
+          return;
         }
-        renderReservedSmsBox();
+        const now = new Date();
+        listEl.innerHTML = items.map(r => {
+          const isImmediate = !r.scheduleAt;
+          const dt = r.scheduleAt ? new Date(r.scheduleAt) : null;
+          const isPast = dt && dt.getTime() < now.getTime();
+          const whenText = isImmediate ? "즉시 발송(처리 대기중)" : `${fmt(dt)} ${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
+          return `
+            <div class="reserved-item">
+              <span class="r-name">${escapeHtml(r.name || "")}</span>
+              <span class="r-when">${escapeHtml(whenText)}</span>
+              <span class="r-msg">${escapeHtml((r.message || "").slice(0, 40))}</span>
+              ${isPast
+                ? `<span class="r-past">발송 시각 지남</span>`
+                : `<button class="btn ghost" data-cancel-doc="${escapeHtml(r.id)}">취소</button>`}
+            </div>
+          `;
+        }).join("");
+        document.querySelectorAll("[data-cancel-doc]").forEach(btn => {
+          btn.addEventListener("click", async () => {
+            const docId = btn.dataset.cancelDoc;
+            btn.disabled = true;
+            btn.textContent = "취소 중…";
+            const result = await cancelReservedSms(docId);
+            if (result.ok) {
+              showToast("✅ 예약 문자를 취소했어요");
+            } else {
+              showToast(`⚠️ 취소 실패: ${result.error}`);
+            }
+            renderReservedSmsBox();
+          });
+        });
+      }).catch(() => {
+        const listEl = document.getElementById("reservedSmsList");
+        if (listEl) listEl.innerHTML = `<div class="sms-hint">불러오지 못했어요.</div>`;
       });
-    });
   }
 
   function renderCalendarBox() {
@@ -2764,6 +2721,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       const data = doc.exists ? doc.data() : {};
       if (data.tuitionSettings) state.tuitionSettings = { ...DEFAULT_TUITION_SETTINGS, ...data.tuitionSettings };
       if (data.calendar) state.calendar = data.calendar;
+      if (data.smsSettings) state.smsSettings = data.smsSettings;
       render();
     }, () => {});
 
