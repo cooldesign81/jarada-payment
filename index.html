@@ -2247,6 +2247,9 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     });
   }
 
+  let reservedSmsCache = [];
+  let reservedSmsSort = "asc";
+
   function renderReservedSmsBox() {
     const box = document.getElementById("reservedSmsBox");
     if (!box) return;
@@ -2256,6 +2259,10 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         <button class="btn ghost" id="reservedSmsCloseBtn">닫기</button>
       </div>
       <div class="sms-hint">1분마다 자동으로 대기열을 확인해서 예약 시각이 된 문자를 발송해요. 발송 전까지는 취소할 수 있어요.</div>
+      <div class="sms-select-actions" style="margin-bottom: 4px;">
+        <input id="reservedSmsSearch" class="sms-input" placeholder="이름으로 검색" style="flex:1;" />
+        <button class="btn ghost" id="reservedSmsSortBtn">날짜순: 임박순 ▲</button>
+      </div>
       <div class="cal-list" id="reservedSmsList" style="max-height:320px;"><div class="sms-hint">불러오는 중…</div></div>
     `;
     const closeBtn = document.getElementById("reservedSmsCloseBtn");
@@ -2263,11 +2270,18 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       document.getElementById("reservedSmsModal").classList.remove("open");
     });
 
+    const searchInput = document.getElementById("reservedSmsSearch");
+    if (searchInput) searchInput.addEventListener("input", renderReservedSmsList);
+    const sortBtn = document.getElementById("reservedSmsSortBtn");
+    if (sortBtn) sortBtn.addEventListener("click", () => {
+      reservedSmsSort = reservedSmsSort === "asc" ? "desc" : "asc";
+      sortBtn.textContent = reservedSmsSort === "asc" ? "날짜순: 임박순 ▲" : "날짜순: 늦은순 ▼";
+      renderReservedSmsList();
+    });
+
     if (!fbCenter) return;
     smsQueueRef().where("center", "==", fbCenter).where("status", "==", "pending")
       .get().then(snap => {
-        const listEl = document.getElementById("reservedSmsList");
-        if (!listEl) return;
         const items = [];
         snap.forEach(doc => {
           const data = doc.data();
@@ -2275,46 +2289,61 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
             items.push({ id: doc.id, name: r.name, message: r.message, scheduleAt: data.scheduleAt });
           });
         });
-        items.sort((a, b) => (a.scheduleAt || "").localeCompare(b.scheduleAt || ""));
-        if (items.length === 0) {
-          listEl.innerHTML = `<div class="sms-hint">예약된 문자가 없어요.</div>`;
-          return;
-        }
-        const now = new Date();
-        listEl.innerHTML = items.map(r => {
-          const isImmediate = !r.scheduleAt;
-          const dt = r.scheduleAt ? new Date(r.scheduleAt) : null;
-          const isPast = dt && dt.getTime() < now.getTime();
-          const whenText = isImmediate ? "즉시 발송(처리 대기중)" : `${fmt(dt)} ${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
-          return `
-            <div class="reserved-item">
-              <span class="r-name">${escapeHtml(r.name || "")}</span>
-              <span class="r-when">${escapeHtml(whenText)}</span>
-              <span class="r-msg">${escapeHtml((r.message || "").slice(0, 40))}</span>
-              ${isPast
-                ? `<span class="r-past">발송 시각 지남</span>`
-                : `<button class="btn ghost" data-cancel-doc="${escapeHtml(r.id)}">취소</button>`}
-            </div>
-          `;
-        }).join("");
-        document.querySelectorAll("[data-cancel-doc]").forEach(btn => {
-          btn.addEventListener("click", async () => {
-            const docId = btn.dataset.cancelDoc;
-            btn.disabled = true;
-            btn.textContent = "취소 중…";
-            const result = await cancelReservedSms(docId);
-            if (result.ok) {
-              showToast("✅ 예약 문자를 취소했어요");
-            } else {
-              showToast(`⚠️ 취소 실패: ${result.error}`);
-            }
-            renderReservedSmsBox();
-          });
-        });
+        reservedSmsCache = items;
+        renderReservedSmsList();
       }).catch(() => {
         const listEl = document.getElementById("reservedSmsList");
         if (listEl) listEl.innerHTML = `<div class="sms-hint">불러오지 못했어요.</div>`;
       });
+  }
+
+  function renderReservedSmsList() {
+    const listEl = document.getElementById("reservedSmsList");
+    if (!listEl) return;
+    const searchInput = document.getElementById("reservedSmsSearch");
+    const query = searchInput ? searchInput.value.trim() : "";
+
+    let items = reservedSmsCache.filter(r => !query || (r.name || "").includes(query));
+    items.sort((a, b) => {
+      const cmp = (a.scheduleAt || "").localeCompare(b.scheduleAt || "");
+      return reservedSmsSort === "asc" ? cmp : -cmp;
+    });
+
+    if (items.length === 0) {
+      listEl.innerHTML = `<div class="sms-hint">${query ? "검색 결과가 없어요." : "예약된 문자가 없어요."}</div>`;
+      return;
+    }
+    const now = new Date();
+    listEl.innerHTML = items.map(r => {
+      const isImmediate = !r.scheduleAt;
+      const dt = r.scheduleAt ? new Date(r.scheduleAt) : null;
+      const isPast = dt && dt.getTime() < now.getTime();
+      const whenText = isImmediate ? "즉시 발송(처리 대기중)" : `${fmt(dt)} ${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
+      return `
+        <div class="reserved-item">
+          <span class="r-name">${escapeHtml(r.name || "")}</span>
+          <span class="r-when">${escapeHtml(whenText)}</span>
+          <span class="r-msg">${escapeHtml((r.message || "").slice(0, 40))}</span>
+          ${isPast
+            ? `<span class="r-past">발송 시각 지남</span>`
+            : `<button class="btn ghost" data-cancel-doc="${escapeHtml(r.id)}">취소</button>`}
+        </div>
+      `;
+    }).join("");
+    document.querySelectorAll("[data-cancel-doc]").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const docId = btn.dataset.cancelDoc;
+        btn.disabled = true;
+        btn.textContent = "취소 중…";
+        const result = await cancelReservedSms(docId);
+        if (result.ok) {
+          showToast("✅ 예약 문자를 취소했어요");
+        } else {
+          showToast(`⚠️ 취소 실패: ${result.error}`);
+        }
+        renderReservedSmsBox();
+      });
+    });
   }
 
   function renderCalendarBox() {
