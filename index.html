@@ -3,26 +3,26 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>자라다 JP 결제 매니저</title>
+<title>JP결제 매니저</title>
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@500;700&family=Noto+Sans+KR:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=Noto+Sans+KR:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
   :root {
-    --bg: #F3F6F2;
+    --bg: #F5F3F0;
     --surface: #FFFFFF;
-    --ink: #1B2A22;
-    --ink-soft: #5B6B60;
-    --line: #DCE6DD;
-    --accent: #2F8F5B;
-    --accent-soft: #E4F3E9;
-    --amber: #E58A2A;
-    --amber-soft: #FBEBD8;
-    --amber-deep: #C9601A;
-    --amber-deep-bg: #F6D3B4;
-    --amber-severe: #A83A1A;
-    --amber-severe-bg: #EFAE83;
+    --ink: #1A1A1A;
+    --ink-soft: #6B6560;
+    --line: #E4DFD8;
+    --accent: #E8720C;
+    --accent-soft: #FDEBDB;
+    --amber: #D9A62C;
+    --amber-soft: #FBF1D6;
+    --amber-deep: #D9691B;
+    --amber-deep-bg: #F6D0A8;
+    --amber-severe: #A32020;
+    --amber-severe-bg: #E9A3A3;
     --mono: 'JetBrains Mono', monospace;
-    --serif: 'Noto Serif KR', serif;
+    --serif: 'Black Han Sans', 'Noto Sans KR', sans-serif;
     --sans: 'Noto Sans KR', sans-serif;
   }
   * { box-sizing: border-box; }
@@ -35,8 +35,12 @@
     font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; color: var(--accent);
     text-transform: uppercase; display: flex; align-items: center; gap: 6px; margin-bottom: 8px;
   }
-  h1 { font-family: var(--serif); font-weight: 700; font-size: 27px; margin: 0 0 6px; line-height: 1.3; }
+  h1 { font-family: var(--serif); font-weight: 400; font-size: 30px; margin: 0 0 6px; line-height: 1.3; letter-spacing: .5px; }
   .by-line { font-family: var(--sans); font-weight: 500; font-size: 13px; color: var(--ink-soft); vertical-align: middle; margin-left: 4px; }
+  .brand-word .c1 { color: #E23B3B; }
+  .brand-word .c2 { color: #2FA84F; }
+  .brand-word .c3 { color: #2B6FE0; }
+  .auth-logo .brand-word, h1 .brand-word { font-family: var(--serif); }
   .sub { color: var(--ink-soft); font-size: 14px; }
   .sub b { font-family: var(--mono); color: var(--ink); font-weight: 600; }
 
@@ -160,7 +164,7 @@
   .empty { text-align: center; padding: 60px 20px; color: var(--ink-soft); }
   .footer-note { margin-top: 18px; font-size: 12px; color: var(--ink-soft); }
   .capture-title {
-    display: none; font-family: var(--serif); font-weight: 700; font-size: 20px;
+    display: none; font-family: var(--sans); font-weight: 700; font-size: 20px;
     color: var(--ink); margin-bottom: 14px;
   }
   .capture-title.show { display: block; }
@@ -175,7 +179,7 @@
     background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.28); color: rgba(255,255,255,.9);
   }
   .revenue-card .btn.ghost:hover { background: rgba(255,255,255,.18); color: #fff; border-color: rgba(255,255,255,.5); }
-  .revenue-title { font-family: var(--serif); font-weight: 700; font-size: 15px; display: flex; align-items: center; gap: 6px; }
+  .revenue-title { font-family: var(--sans); font-weight: 700; font-size: 15px; display: flex; align-items: center; gap: 6px; }
   .revenue-block { display: flex; flex-direction: column; gap: 6px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,.12); }
   .revenue-block:first-of-type { border-top: none; padding-top: 0; }
   .revenue-title .mono, .revenue-total .mono { font-family: var(--mono); font-weight: 400; font-size: 12px; opacity: .7; }
@@ -186,7 +190,7 @@
 
   .newstudents-card { margin-top: 16px; }
   .ns-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-bottom: 1px solid var(--line); }
-  .ns-title { font-family: var(--serif); font-weight: 700; font-size: 15px; }
+  .ns-title { font-family: var(--sans); font-weight: 700; font-size: 15px; }
   .ns-input {
     font-family: var(--sans); font-size: 12.5px; border: 1px solid transparent; background: transparent;
     border-radius: 6px; padding: 5px 6px; width: 90px; color: var(--ink);
@@ -213,7 +217,7 @@
     padding: 32px 28px; width: 320px; box-shadow: 0 10px 30px rgba(0,0,0,0.08);
     display: flex; flex-direction: column; gap: 10px;
   }
-  .auth-logo { font-family: var(--serif); font-weight: 700; font-size: 17px; margin-bottom: 6px; text-align: center; }
+  .auth-logo { font-family: var(--sans); font-weight: 700; font-size: 17px; margin-bottom: 6px; text-align: center; }
   .auth-title { font-size: 13px; color: var(--ink-soft); margin-bottom: 6px; text-align: center; }
   .auth-input { width: 100%; padding: 10px 12px; font-size: 14px; }
   .auth-btn { width: 100%; justify-content: center; padding: 11px; font-size: 14px; margin-top: 4px; }
@@ -226,7 +230,7 @@
     padding: 18px; display: flex; flex-direction: column; gap: 16px;
   }
   .sms-panel-head { display: flex; align-items: center; justify-content: space-between; }
-  .sms-title { font-family: var(--serif); font-weight: 700; font-size: 17px; }
+  .sms-title { font-family: var(--sans); font-weight: 700; font-size: 17px; }
   .sms-section { display: flex; flex-direction: column; gap: 8px; }
   .sms-section-title { font-weight: 700; font-size: 13px; color: var(--ink); }
   .sms-section-title-row { display: flex; align-items: center; justify-content: space-between; }
@@ -267,7 +271,7 @@
     #printArea, #printArea * { visibility: visible; }
     #printArea { position: absolute; left: 0; top: 0; width: 100%; padding: 10px; }
     .print-only {
-      display: block; margin-bottom: 14px; font-family: var(--serif); font-weight: 700; font-size: 18px;
+      display: block; margin-bottom: 14px; font-family: var(--sans); font-weight: 700; font-size: 18px;
     }
     .table-card { border: none; border-radius: 0; }
     table { font-size: 9.5px; }
@@ -396,7 +400,7 @@
 
   <div id="authScreen" class="auth-screen">
     <div class="auth-box">
-      <div class="auth-logo">🌱 자라다 JP 결제 매니저</div>
+      <div class="auth-logo"><span class="brand-word"><span class="c1">자</span><span class="c2">라</span><span class="c3">다</span></span> JP 결제 매니저</div>
       <div id="authForm">
         <div class="auth-title">로그인</div>
         <input id="authEmail" class="sms-input auth-input" type="email" placeholder="이메일" />
@@ -585,10 +589,17 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     if (!start || !end) return null;
     return Math.round((end.getTime() - start.getTime()) / (7*86400000)) + 1;
   }
-  function weeksLate(end, asOf) {
-    const days = (asOf || startOfDay(new Date())).getTime() - end.getTime();
-    if (days <= 0) return 0;
-    return Math.round(days / (7*86400000));
+  function weeksLate(end, asOf, cal) {
+    if (!end || !asOf) return 0;
+    if (asOf.getTime() <= end.getTime()) return 0;
+    let candidate = addDays(end, 7);
+    let counted = 0, guard = 0;
+    while (candidate.getTime() <= asOf.getTime() && guard < 60) {
+      if (!cal || !isBlocked(candidate, cal)) counted++;
+      candidate = addDays(candidate, 7);
+      guard++;
+    }
+    return counted;
   }
 
   function mondayOf(d) {
@@ -718,7 +729,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     message: "",
     messageType: "info",
     smsOpen: false,
-    smsTestMode: true,
+    smsTestMode: false,
     smsSelected: {},
     smsSending: false,
     smsResults: {},
@@ -764,7 +775,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   }
 
   const SMS_TITLE_KEY = "academy_sms_title_v1";
-  const DEFAULT_SMS_TITLE = "결제 안내";
+  const DEFAULT_SMS_TITLE = "수업 등록 안내_{센터명}";
   function loadSmsTitle() {
     try { return localStorage.getItem(SMS_TITLE_KEY) || DEFAULT_SMS_TITLE; } catch (e) { return DEFAULT_SMS_TITLE; }
   }
@@ -1090,7 +1101,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         teacher: r.teacher, day: r.day, time: r.time,
         endDate: fmtShort(end), endDateISO: r.endDateISO,
         session: weeksBetween(start, end) ?? "-",
-        late: weeksLate(end, nextSaturday),
+        late: weeksLate(end, nextSaturday, state.calendar),
         discount: r.discount,
       };
       if (!grouped[entry.day]) grouped[entry.day] = [];
@@ -1293,7 +1304,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     let okCount = 0, failCount = 0;
     for (const s of list) {
       const msg = fillTemplate(state.smsTemplate, s);
-      const result = await enqueueSms(s, msg, state.smsSendNow ? "" : state.smsReserveDate, state.smsReserveTime, state.smsTitle);
+      const result = await enqueueSms(s, msg, state.smsSendNow ? "" : state.smsReserveDate, state.smsReserveTime, fillTemplate(state.smsTitle, s));
       state.smsResults[s.id] = result;
       if (result.ok) okCount += 1; else failCount += 1;
       render();
@@ -1323,7 +1334,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     for (const s of list) {
       const msg = fillTemplate(state.autoSmsTemplate, s);
       const reserve = defaultReserveForDay(s.day);
-      const result = await enqueueSms(s, msg, reserve.date, reserve.time, state.autoSmsTitle);
+      const result = await enqueueSms(s, msg, reserve.date, reserve.time, fillTemplate(state.autoSmsTitle, s));
       state.autoSmsResults[s.id] = result;
       if (result.ok) okCount += 1; else failCount += 1;
       renderAutoSmsBox();
@@ -1639,8 +1650,8 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
 
     let html = `
       <div class="header">
-        <div class="eyebrow">🌱 ${escapeHtml(state.tuitionSettings.name || "학원")} 결제 관리 ${fbCenter ? `<span class="mono" style="opacity:.6; margin-left:6px;">(${escapeHtml(fbCenter)} 계정)</span> <span class="logout-link" id="logoutBtn">로그아웃</span>` : ``}</div>
-        <h1>자라다 JP 결제 매니저 <span class="by-line">by Jin</span></h1>
+        <div class="eyebrow">🎨 ${escapeHtml(state.tuitionSettings.name || "학원")} 결제 관리 ${fbCenter ? `<span class="mono" style="opacity:.6; margin-left:6px;">(${escapeHtml(fbCenter)} 계정)</span> <span class="logout-link" id="logoutBtn">로그아웃</span>` : ``}</div>
+        <h1><span class="brand-word"><span class="c1">자</span><span class="c2">라</span><span class="c3">다</span></span> JP 결제 매니저 <span class="by-line">by Jin</span></h1>
         <div class="toolbar">
           <input type="date" class="refdate" id="refDateInput" value="${fmt(state.refDate)}" title="기준일 (보통 오늘)" />
           <button class="btn" id="calendarOpenBtn">📅 학사달력</button>
@@ -2768,6 +2779,13 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       if (data.tuitionSettings) state.tuitionSettings = { ...DEFAULT_TUITION_SETTINGS, ...data.tuitionSettings };
       if (data.calendar) state.calendar = data.calendar;
       if (data.smsSettings) state.smsSettings = data.smsSettings;
+      // 학사달력(공휴일/방학)이 바뀌면 '경과' 등 계산이 달라지므로 명단을 다시 계산해줌
+      if (state.rawRosterRows && state.rawRosterRows.length) {
+        const { nextSaturday } = nextWeekRange(state.refDate);
+        const { grouped, kept } = buildGroupedForWeek(state.rawRosterRows, nextSaturday);
+        state.students = grouped;
+        state.rawCount = kept;
+      }
       render();
     }, () => {});
 
