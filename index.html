@@ -223,6 +223,10 @@
   .auth-btn { width: 100%; justify-content: center; padding: 11px; font-size: 14px; margin-top: 4px; }
   .auth-error { color: #C9401F; font-size: 12.5px; text-align: center; min-height: 16px; }
   .logout-link { font-size: 11px; color: var(--ink-soft); text-decoration: underline; cursor: pointer; }
+  .center-switch {
+    font-family: var(--sans); font-size: 11px; border: 1px solid var(--line); border-radius: 6px;
+    padding: 2px 4px; margin-left: 6px; background: var(--accent-soft); color: var(--accent); font-weight: 600;
+  }
 
 
   .sms-panel {
@@ -262,6 +266,10 @@
   .sms-preview {
     background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 12px;
     font-size: 13px; line-height: 1.6; white-space: pre-wrap;
+  }
+  .sms-preview-title {
+    font-weight: 700; font-size: 13.5px; color: var(--ink); margin-bottom: 8px;
+    padding-bottom: 8px; border-bottom: 1px dashed var(--line); white-space: normal;
   }
   .sms-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
   .sms-testmode { font-size: 12.5px; color: var(--ink-soft); display: flex; align-items: center; gap: 6px; }
@@ -320,6 +328,8 @@
   .reserved-item .r-when { font-family: var(--mono); color: var(--ink-soft); }
   .reserved-item .r-msg { color: var(--ink-soft); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .reserved-item .r-past { font-size: 11px; color: var(--ink-soft); font-family: var(--mono); }
+  .reserved-item .r-status-ok { font-size: 11.5px; color: #1F8A3B; font-weight: 700; white-space: nowrap; }
+  .reserved-item .r-status-fail { font-size: 11.5px; color: #C9401F; font-weight: 700; white-space: nowrap; }
   .calendar-box { width: 560px; }
   .cal-section { display: flex; flex-direction: column; gap: 8px; }
   .cal-section-title { font-weight: 700; font-size: 13px; }
@@ -774,7 +784,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     try { localStorage.setItem(SMS_TEMPLATE_KEY, t); } catch (e) {}
   }
 
-  const SMS_TITLE_KEY = "academy_sms_title_v1";
+  const SMS_TITLE_KEY = "academy_sms_title_v2";
   const DEFAULT_SMS_TITLE = "수업 등록 안내_{센터명}";
   function loadSmsTitle() {
     try { return localStorage.getItem(SMS_TITLE_KEY) || DEFAULT_SMS_TITLE; } catch (e) { return DEFAULT_SMS_TITLE; }
@@ -1396,7 +1406,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     html += `
       <div class="sms-section">
         <div class="sms-section-title">미리보기 (선택된 첫 번째 학생 기준)</div>
-        <div class="sms-preview">${firstSelected ? escapeHtml(fillTemplate(state.smsTemplate, firstSelected)) : ""}</div>
+        <div class="sms-preview">${firstSelected ? `<div class="sms-preview-title">${escapeHtml(fillTemplate(state.smsTitle, firstSelected))}</div>` : ""}${firstSelected ? escapeHtml(fillTemplate(state.smsTemplate, firstSelected)) : ""}</div>
       </div>
 
       <div class="sms-section">
@@ -1650,7 +1660,11 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
 
     let html = `
       <div class="header">
-        <div class="eyebrow">🎨 ${escapeHtml(state.tuitionSettings.name || "학원")} 결제 관리 ${fbCenter ? `<span class="mono" style="opacity:.6; margin-left:6px;">(${escapeHtml(fbCenter)} 계정)</span> <span class="logout-link" id="logoutBtn">로그아웃</span>` : ``}</div>
+        <div class="eyebrow">🎨 ${escapeHtml(state.tuitionSettings.name || "학원")} 결제 관리 ${fbCenter ? `<span class="mono" style="opacity:.6; margin-left:6px;">(${escapeHtml(fbCenter)} 계정)</span> ${state.isAdmin ? `<select id="adminCenterSwitch" class="center-switch">
+            <option value="안양평촌원" ${fbCenter === "안양평촌원" ? "selected" : ""}>안양평촌원</option>
+            <option value="서초반포원" ${fbCenter === "서초반포원" ? "selected" : ""}>서초반포원</option>
+            <option value="강남대치원" ${fbCenter === "강남대치원" ? "selected" : ""}>강남대치원</option>
+          </select>` : ``} <span class="logout-link" id="logoutBtn">로그아웃</span>` : ``}</div>
         <h1><span class="brand-word"><span class="c1">자</span><span class="c2">라</span><span class="c3">다</span></span> JP 결제 매니저 <span class="by-line">by Jin</span></h1>
         <div class="toolbar">
           <input type="date" class="refdate" id="refDateInput" value="${fmt(state.refDate)}" title="기준일 (보통 오늘)" />
@@ -1796,6 +1810,17 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       if (window.confirm("로그아웃 하시겠어요?")) {
         fbAuth.signOut();
       }
+    });
+
+    const adminCenterSwitch = document.getElementById("adminCenterSwitch");
+    if (adminCenterSwitch) adminCenterSwitch.addEventListener("change", () => {
+      const newCenter = adminCenterSwitch.value;
+      if (newCenter === fbCenter) return;
+      fbCenter = newCenter;
+      loadWeekFromStorage();
+      state.message = "";
+      startFirestoreSync();
+      render();
     });
 
     const calendarOpenBtn = document.getElementById("calendarOpenBtn");
@@ -2292,6 +2317,9 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         <button class="btn ghost" id="reservedSmsSortBtn">날짜순: 임박순 ▲</button>
       </div>
       <div class="cal-list" id="reservedSmsList" style="max-height:320px;"><div class="sms-hint">불러오는 중…</div></div>
+
+      <div class="sms-section-title" style="margin-top: 16px;">✅ 최근 발송 결과 (최근 20건)</div>
+      <div class="cal-list" id="reservedSmsHistoryList" style="max-height:260px;"><div class="sms-hint">불러오는 중…</div></div>
     `;
     const closeBtn = document.getElementById("reservedSmsCloseBtn");
     if (closeBtn) closeBtn.addEventListener("click", () => {
@@ -2322,6 +2350,41 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       }).catch(() => {
         const listEl = document.getElementById("reservedSmsList");
         if (listEl) listEl.innerHTML = `<div class="sms-hint">불러오지 못했어요.</div>`;
+      });
+
+    smsQueueRef().where("center", "==", fbCenter).where("status", "in", ["sent", "failed"])
+      .get().then(snap => {
+        const historyEl = document.getElementById("reservedSmsHistoryList");
+        if (!historyEl) return;
+        let items = [];
+        snap.forEach(doc => {
+          const data = doc.data();
+          (data.recipients || []).forEach(r => {
+            items.push({ name: r.name, message: r.message, status: data.status, processedAt: data.processedAt || 0, error: data.error || "" });
+          });
+        });
+        items.sort((a, b) => b.processedAt - a.processedAt);
+        items = items.slice(0, 20);
+        if (items.length === 0) {
+          historyEl.innerHTML = `<div class="sms-hint">아직 처리된 발송 내역이 없어요.</div>`;
+          return;
+        }
+        historyEl.innerHTML = items.map(r => {
+          const when = r.processedAt ? new Date(r.processedAt) : null;
+          const whenText = when ? `${fmt(when)} ${pad(when.getHours())}:${pad(when.getMinutes())}` : "-";
+          const ok = r.status === "sent";
+          return `
+            <div class="reserved-item">
+              <span class="r-name">${escapeHtml(r.name || "")}</span>
+              <span class="r-when">${escapeHtml(whenText)}</span>
+              <span class="r-msg">${escapeHtml((r.message || "").slice(0, 30))}</span>
+              <span class="${ok ? "r-status-ok" : "r-status-fail"}">${ok ? "✅ 발송완료" : "❌ 실패" + (r.error ? `(${escapeHtml(r.error)})` : "")}</span>
+            </div>
+          `;
+        }).join("");
+      }).catch(() => {
+        const historyEl = document.getElementById("reservedSmsHistoryList");
+        if (historyEl) historyEl.innerHTML = `<div class="sms-hint">불러오지 못했어요.</div>`;
       });
   }
 
@@ -2570,7 +2633,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     html += `
       <div class="sms-section">
         <div class="sms-section-title">미리보기 (선택된 첫 번째 학생 기준)</div>
-        <div class="sms-preview">${firstAutoSelected ? escapeHtml(fillTemplate(state.autoSmsTemplate, firstAutoSelected)) : ""}</div>
+        <div class="sms-preview">${firstAutoSelected ? `<div class="sms-preview-title">${escapeHtml(fillTemplate(state.autoSmsTitle, firstAutoSelected))}</div>` : ""}${firstAutoSelected ? escapeHtml(fillTemplate(state.autoSmsTemplate, firstAutoSelected)) : ""}</div>
       </div>
     `;
 
@@ -2805,15 +2868,19 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     }, () => {});
   }
 
+  const ADMIN_EMAILS = ["jinhyuck@gmail.com"];
+
   fbAuth.onAuthStateChanged(async (user) => {
     if (!user) {
       stopFirestoreSync();
       fbCenter = null;
+      state.isAdmin = false;
       hideCenterScreen();
       showAuthScreen();
       return;
     }
     hideAuthScreen();
+    state.isAdmin = ADMIN_EMAILS.includes((user.email || "").toLowerCase());
     try {
       const snap = await userCenterRef(user.uid).get();
       if (snap.exists && snap.data().center) {
