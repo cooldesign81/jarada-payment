@@ -32,11 +32,16 @@
 
   .header { margin-bottom: 22px; }
   .eyebrow {
-    font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; color: var(--accent);
-    text-transform: uppercase; display: flex; align-items: center; gap: 6px; margin-bottom: 8px;
+    background: var(--ink); color: rgba(255,255,255,0.82);
+    font-family: var(--sans); font-size: 12.5px; font-weight: 500; letter-spacing: 0.01em;
+    display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+    padding: 7px 16px; border-radius: 8px 8px 0 0; margin-bottom: 0;
   }
-  h1 { font-family: var(--serif); font-weight: 400; font-size: 30px; margin: 0 0 6px; line-height: 1.3; letter-spacing: .5px; }
-  .by-line { font-family: var(--sans); font-weight: 500; font-size: 13px; color: var(--ink-soft); vertical-align: middle; margin-left: 4px; }
+  .eyebrow-right { display: flex; align-items: center; gap: 8px; }
+  .acct-text { font-family: var(--sans); font-size: 12.5px; opacity: 0.75; }
+  .title-bar { background: #FECD3F; border-radius: 0 0 8px 8px; padding: 8px 18px; margin-bottom: 16px; }
+  h1 { font-family: var(--sans); font-weight: 800; font-size: 17px; margin: 0; line-height: 1.3; color: #222222; }
+  .by-line { font-family: var(--sans); font-weight: 500; font-size: 12px; color: rgba(34,34,34,0.6); vertical-align: middle; margin-left: 4px; }
   .brand-word .c1 { color: #E23B3B; }
   .brand-word .c2 { color: #2FA84F; }
   .brand-word .c3 { color: #2B6FE0; }
@@ -222,10 +227,11 @@
   .auth-input { width: 100%; padding: 10px 12px; font-size: 14px; }
   .auth-btn { width: 100%; justify-content: center; padding: 11px; font-size: 14px; margin-top: 4px; }
   .auth-error { color: #C9401F; font-size: 12.5px; text-align: center; min-height: 16px; }
-  .logout-link { font-size: 11px; color: var(--ink-soft); text-decoration: underline; cursor: pointer; }
+  .logout-link { font-size: 11.5px; color: rgba(255,255,255,0.65); text-decoration: underline; cursor: pointer; }
+  .logout-link:hover { color: #fff; }
   .center-switch {
-    font-family: var(--sans); font-size: 11px; border: 1px solid var(--line); border-radius: 6px;
-    padding: 2px 4px; margin-left: 6px; background: var(--accent-soft); color: var(--accent); font-weight: 600;
+    font-family: var(--sans); font-size: 11px; border: 1px solid rgba(255,255,255,0.25); border-radius: 6px;
+    padding: 2px 4px; background: rgba(255,255,255,0.12); color: #fff; font-weight: 600;
   }
 
 
@@ -574,14 +580,18 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   }
   function formatManwon(v) {
     if (v === null || v === undefined) return "-";
-    return `${Math.round(v / 10000)}만원`;
+    const manwon = v / 10000;
+    const rounded = Math.round(manwon * 10) / 10; // 소수 첫째자리까지만 (예: 4.5만원)
+    const text = Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+    return `${text}만원`;
   }
   function parseWonInput(str) {
-    const digits = String(str).replace(/[^\d]/g, "");
-    if (!digits) return 0;
-    let n = parseInt(digits, 10);
-    if (n < 10000) n = n * 10000; // "44" 또는 "44만원" 처럼 만원 단위로 입력한 경우 자동 환산
-    return n;
+    const cleaned = String(str).replace(/[^\d.]/g, ""); // 숫자와 소수점만 남김 (예: "4.5만원" → "4.5")
+    if (!cleaned) return 0;
+    const n = parseFloat(cleaned);
+    if (isNaN(n)) return 0;
+    if (n < 10000) return Math.round(n * 10000); // "44" 또는 "4.5" 처럼 만원 단위로 입력한 경우 자동 환산
+    return Math.round(n);
   }
   const CLASS_RE = /^(\d+)\s*번\(([^)]+)\)\s*\(([월화수목금토일])\s*-\s*(\d+)\s+(\d{1,2}:\d{2})\)/;
   const PAY_METHODS = ["카드", "이체", "제로페이", "현금"];
@@ -756,6 +766,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     checklist: {},
     newStudents: {},
     otherPayers: {},
+    boxPayers: {},
     activeDay: null,
     rawCount: 0,
     centerName: "",
@@ -924,6 +935,14 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         byMethod[m] = (byMethod[m] || 0) + amt;
       }
     });
+    allBoxPayersFlat().forEach(r => {
+      if (r.paid && r.paidDate === today && r._day === todayLetter) {
+        const amt = Number(r.amount) || 0;
+        total += amt;
+        const m = r.method || "카드";
+        byMethod[m] = (byMethod[m] || 0) + amt;
+      }
+    });
     return { today, total, byMethod };
   }
 
@@ -974,6 +993,20 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         nextTerm: "-",
       });
     });
+    allBoxPayersFlat().filter(r => r.paid).forEach(r => {
+      rows.push({
+        day: `상자(${DAY_FULL[r._day] || r._day})`,
+        name: r.name || "",
+        age: r.age || "-",
+        teacher: "-",
+        time: "-",
+        method: r.method || "카드",
+        amount: Number(r.amount) || 0,
+        paidDate: r.paidDate || "",
+        memo: r.memo || "",
+        nextTerm: "-",
+      });
+    });
     let csv = "\uFEFF체크일,요일,이름,나이,교사,수업시간,금액,결제방법,메모,다음텀\n";
     rows.forEach(r => {
       const memoSafe = String(r.memo || "").replace(/"/g, '""');
@@ -1009,6 +1042,14 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       }
     });
     allOtherPayersFlat().forEach(r => {
+      if (r.paid) {
+        const amt = Number(r.amount) || 0;
+        total += amt;
+        const m = r.method || "카드";
+        byMethod[m] = (byMethod[m] || 0) + amt;
+      }
+    });
+    allBoxPayersFlat().forEach(r => {
       if (r.paid) {
         const amt = Number(r.amount) || 0;
         total += amt;
@@ -1074,6 +1115,15 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   function saveOtherPayers() {
     if (!fbCenter) return;
     centerWeekRef(weekKey()).set({ otherPayers: state.otherPayers }, { merge: true }).catch(() => {
+      state.message = "저장에 실패했어요 (인터넷 연결을 확인해주세요).";
+      state.messageType = "error";
+      render();
+    });
+  }
+
+  function saveBoxPayers() {
+    if (!fbCenter) return;
+    centerWeekRef(weekKey()).set({ boxPayers: state.boxPayers }, { merge: true }).catch(() => {
       state.message = "저장에 실패했어요 (인터넷 연결을 확인해주세요).";
       state.messageType = "error";
       render();
@@ -1191,29 +1241,33 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   }
 
   function clearChecklist() {
-    if (!window.confirm("정말로 이번 주 체크 기록(결제/LMS/엑셀 체크, 메모, 결제방법)과 오늘의 신규생·기타 결제자 등록 내용을 전부 지울까요? 지운 뒤에도 잠깐은 '되돌리기'로 복구할 수 있어요.")) {
+    if (!window.confirm("정말로 이번 주 체크 기록(결제/LMS/엑셀 체크, 메모, 결제방법)과 오늘의 신규생·기타 결제자·연구원 상자 결제자 등록 내용을 전부 지울까요? 지운 뒤에도 잠깐은 '되돌리기'로 복구할 수 있어요.")) {
       return;
     }
     const snapshot = {
       checklist: JSON.parse(JSON.stringify(state.checklist)),
       newStudents: JSON.parse(JSON.stringify(state.newStudents)),
       otherPayers: JSON.parse(JSON.stringify(state.otherPayers)),
+      boxPayers: JSON.parse(JSON.stringify(state.boxPayers)),
       wk: weekKey(),
     };
     state.checklist = {};
     state.newStudents = {};
     state.otherPayers = {};
+    state.boxPayers = {};
     if (fbCenter) {
-      centerWeekRef(weekKey()).set({ checklist: {}, newStudents: {}, otherPayers: {} }).catch(() => {});
+      centerWeekRef(weekKey()).set({ checklist: {}, newStudents: {}, otherPayers: {}, boxPayers: {} }).catch(() => {});
     }
     render();
-    showUndoToast("🗑 체크 기록과 신규생·기타 결제자를 초기화했어요", () => {
+    showUndoToast("🗑 체크 기록과 신규생·기타·상자 결제자를 초기화했어요", () => {
       state.checklist = snapshot.checklist;
       state.newStudents = snapshot.newStudents;
       state.otherPayers = snapshot.otherPayers;
+      state.boxPayers = snapshot.boxPayers;
       if (fbCenter && weekKey() === snapshot.wk) {
         centerWeekRef(snapshot.wk).set({
-          checklist: snapshot.checklist, newStudents: snapshot.newStudents, otherPayers: snapshot.otherPayers,
+          checklist: snapshot.checklist, newStudents: snapshot.newStudents,
+          otherPayers: snapshot.otherPayers, boxPayers: snapshot.boxPayers,
         }).catch(() => {});
       }
       render();
@@ -1561,13 +1615,34 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     return null;
   }
 
+  function allBoxPayersFlat() {
+    let all = [];
+    if (!state.boxPayers || Array.isArray(state.boxPayers)) return all;
+    Object.keys(state.boxPayers).forEach(day => {
+      const list = state.boxPayers[day];
+      if (Array.isArray(list)) list.forEach(r => all.push({ ...r, _day: day }));
+    });
+    return all;
+  }
+  function boxPayersForActiveDay() {
+    if (state.activeDay === "전체") return allBoxPayersFlat();
+    return state.boxPayers[state.activeDay] || [];
+  }
+  function findBoxPayerById(id) {
+    for (const day of Object.keys(state.boxPayers)) {
+      const found = (state.boxPayers[day] || []).find(r => r.id === id);
+      if (found) return found;
+    }
+    return null;
+  }
+
   function renderNewStudentsCard() {
     const isAll = state.activeDay === "전체";
     const rows = newStudentsForActiveDay();
     let html = `
       <div class="table-card newstudents-card">
         <div class="ns-head">
-          <div class="ns-title">🌱 ${isAll ? "전체" : escapeHtml(DAY_FULL[state.activeDay] || "")} 신규생</div>
+          <div class="ns-title">${isAll ? "전체" : escapeHtml(DAY_FULL[state.activeDay] || "")} 신규생</div>
           ${isAll ? `` : `<button class="btn primary" id="nsAddBtn">+ 추가</button>`}
         </div>
         <div class="table-wrap"><table>
@@ -1615,7 +1690,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     let html = `
       <div class="table-card newstudents-card">
         <div class="ns-head">
-          <div class="ns-title">🧾 ${isAll ? "전체" : escapeHtml(DAY_FULL[state.activeDay] || "")} 기타 결제자</div>
+          <div class="ns-title">${isAll ? "전체" : escapeHtml(DAY_FULL[state.activeDay] || "")} 기타 결제자</div>
           ${isAll ? `` : `<button class="btn primary" id="opAddBtn">+ 추가</button>`}
         </div>
         <div class="table-wrap"><table>
@@ -1650,6 +1725,53 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
           <td class="ns-warn">LMS에서 반배정 및 결제등록해주세요.</td>
           <td><input class="ns-input" data-opid="${r.id}" data-field="memo" placeholder="메모" value="${escapeHtml(r.memo || "")}" ${isAll ? "readonly" : ""} /></td>
           <td>${isAll ? `` : `<button class="ns-del" data-opid="${r.id}" title="삭제">✕</button>`}</td>
+        </tr>
+      `;
+    });
+    html += `</tbody></table></div></div>`;
+    return html;
+  }
+
+  function renderBoxPayersCard() {
+    const isAll = state.activeDay === "전체";
+    const rows = boxPayersForActiveDay();
+    let html = `
+      <div class="table-card newstudents-card">
+        <div class="ns-head">
+          <div class="ns-title">${isAll ? "전체" : escapeHtml(DAY_FULL[state.activeDay] || "")} 연구원 상자 결제자</div>
+          ${isAll ? `` : `<button class="btn primary" id="bpAddBtn">+ 추가</button>`}
+        </div>
+        <div class="table-wrap"><table>
+          <thead><tr>
+            <th>NO</th>${isAll ? `<th>요일</th>` : ``}<th>이름</th><th>나이</th><th>금액</th>
+            <th class="check-head">결제</th><th class="check-head">LMS</th><th class="check-head">엑셀</th>
+            <th>결제방법</th><th>old</th><th>new</th><th>메모</th><th></th>
+          </tr></thead>
+          <tbody>
+    `;
+    if (rows.length === 0) {
+      html += `<tr><td colspan="${isAll ? 13 : 12}" class="ns-empty">${isAll ? "등록된 연구원 상자 결제자가 없어요." : `연구원 상자 결제자가 있으면 "+ 추가"를 눌러주세요.`}</td></tr>`;
+    }
+    rows.forEach((r, i) => {
+      html += `
+        <tr>
+          <td class="no-cell">${i + 1}</td>
+          ${isAll ? `<td class="mono">${escapeHtml(r._day)}</td>` : ``}
+          <td><input class="ns-input" data-bpid="${r.id}" data-field="name" value="${escapeHtml(r.name)}" placeholder="이름" ${isAll ? "readonly" : ""} /></td>
+          <td><input class="ns-input ns-num" data-bpid="${r.id}" data-field="age" type="number" value="${r.age}" ${isAll ? "readonly" : ""} /></td>
+          <td><input class="ns-input ns-num" data-bpid="${r.id}" data-field="amount" type="text" value="${formatManwon(Number(r.amount) || 0)}" ${isAll ? "readonly" : ""} /></td>
+          <td><button class="checkbtn ${r.paid ? "on" : ""}" data-bpid="${r.id}" data-bpfield="paid" ${isAll ? "disabled" : ""}>${r.paid ? "✓" : ""}</button></td>
+          <td><button class="checkbtn ${r.lms ? "on" : ""}" data-bpid="${r.id}" data-bpfield="lms" ${isAll ? "disabled" : ""}>${r.lms ? "✓" : ""}</button></td>
+          <td><button class="checkbtn ${r.excel ? "on" : ""}" data-bpid="${r.id}" data-bpfield="excel" ${isAll ? "disabled" : ""}>${r.excel ? "✓" : ""}</button></td>
+          <td>
+            <select class="pay-select ${r.paid ? "" : "unpaid-hide"}" data-bpid="${r.id}" data-field="method" ${isAll ? "disabled" : ""}>
+              ${PAY_METHODS.map(m => `<option value="${m}" ${r.method === m ? "selected" : ""}>${m}</option>`).join("")}
+            </select>
+          </td>
+          <td><button class="ns-toggle ${r.boxType === "old" ? "on" : ""}" data-bpid="${r.id}" data-boxtype="old" ${isAll ? "disabled" : ""}>old</button></td>
+          <td><button class="ns-toggle ${r.boxType === "new" ? "on" : ""}" data-bpid="${r.id}" data-boxtype="new" ${isAll ? "disabled" : ""}>new</button></td>
+          <td><input class="ns-input" data-bpid="${r.id}" data-field="memo" placeholder="메모" value="${escapeHtml(r.memo || "")}" ${isAll ? "readonly" : ""} /></td>
+          <td>${isAll ? `` : `<button class="ns-del" data-bpid="${r.id}" title="삭제">✕</button>`}</td>
         </tr>
       `;
     });
@@ -1700,12 +1822,21 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
 
     let html = `
       <div class="header">
-        <div class="eyebrow">🎨 ${escapeHtml(state.tuitionSettings.name || "학원")} 결제 관리 ${fbCenter ? `<span class="mono" style="opacity:.6; margin-left:6px;">(${escapeHtml(fbCenter)} 계정)</span> ${state.isAdmin ? `<select id="adminCenterSwitch" class="center-switch">
-            <option value="안양평촌원" ${fbCenter === "안양평촌원" ? "selected" : ""}>안양평촌원</option>
-            <option value="서초반포원" ${fbCenter === "서초반포원" ? "selected" : ""}>서초반포원</option>
-            <option value="강남대치원" ${fbCenter === "강남대치원" ? "selected" : ""}>강남대치원</option>
-          </select>` : ``} <span class="logout-link" id="logoutBtn">로그아웃</span>` : ``}</div>
-        <h1><span class="brand-word"><span class="c1">자</span><span class="c2">라</span><span class="c3">다</span></span> JP 결제 매니저 <span class="by-line">by Jin</span></h1>
+        <div class="eyebrow">
+          <span></span>
+          ${fbCenter ? `<span class="eyebrow-right">
+            <span class="acct-text">${escapeHtml(fbCenter)} 계정</span>
+            ${state.isAdmin ? `<select id="adminCenterSwitch" class="center-switch">
+              <option value="안양평촌원" ${fbCenter === "안양평촌원" ? "selected" : ""}>안양평촌원</option>
+              <option value="서초반포원" ${fbCenter === "서초반포원" ? "selected" : ""}>서초반포원</option>
+              <option value="강남대치원" ${fbCenter === "강남대치원" ? "selected" : ""}>강남대치원</option>
+            </select>` : ``}
+            <span class="logout-link" id="logoutBtn">로그아웃</span>
+          </span>` : ``}
+        </div>
+        <div class="title-bar">
+          <h1>자라다 JP 결제 매니저 <span class="by-line">by Jin</span></h1>
+        </div>
         <div class="toolbar">
           <input type="date" class="refdate" id="refDateInput" value="${fmt(state.refDate)}" title="기준일 (보통 오늘)" />
           <button class="btn" id="calendarOpenBtn">📅 학사달력</button>
@@ -1816,6 +1947,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
 
       html += renderNewStudentsCard();
       html += renderOtherPayersCard();
+      html += renderBoxPayersCard();
       html += renderRevenueCard();
       html += `</div>`;
 
@@ -2111,6 +2243,80 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
           state.otherPayers[day] = state.otherPayers[day].filter(r => r.id !== b.dataset.opid);
         }
         saveOtherPayers();
+        render();
+      });
+    });
+
+    const bpAddBtn = document.getElementById("bpAddBtn");
+    if (bpAddBtn) bpAddBtn.addEventListener("click", () => {
+      if (state.activeDay === "전체") return;
+      if (!state.boxPayers[state.activeDay]) state.boxPayers[state.activeDay] = [];
+      state.boxPayers[state.activeDay].push({
+        id: "bp_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7),
+        name: "", age: "", amount: 0,
+        paid: false, lms: false, excel: false, method: "카드",
+        boxType: null, memo: "", paidDate: null,
+      });
+      saveBoxPayers();
+      render();
+    });
+
+    document.querySelectorAll(".ns-input[data-bpid]").forEach(inp => {
+      inp.addEventListener("blur", () => {
+        const row = findBoxPayerById(inp.dataset.bpid);
+        if (!row) return;
+        const field = inp.dataset.field;
+        if (field === "amount") {
+          row.amount = parseWonInput(inp.value);
+          saveBoxPayers();
+          render();
+        } else {
+          row[field] = inp.value;
+          saveBoxPayers();
+        }
+      });
+    });
+
+    document.querySelectorAll(".pay-select[data-bpid]").forEach(sel => {
+      sel.addEventListener("change", () => {
+        const row = findBoxPayerById(sel.dataset.bpid);
+        if (!row) return;
+        row.method = sel.value;
+        saveBoxPayers();
+      });
+    });
+
+    document.querySelectorAll(".checkbtn[data-bpfield]").forEach(b => {
+      b.addEventListener("click", () => {
+        const row = findBoxPayerById(b.dataset.bpid);
+        if (!row) return;
+        const field = b.dataset.bpfield;
+        row[field] = !row[field];
+        if (field === "paid") row.paidDate = row.paid ? fmt(new Date()) : null;
+        saveBoxPayers();
+        render();
+      });
+    });
+
+    document.querySelectorAll(".ns-toggle[data-boxtype]").forEach(b => {
+      b.addEventListener("click", () => {
+        const row = findBoxPayerById(b.dataset.bpid);
+        if (!row) return;
+        const type = b.dataset.boxtype;
+        row.boxType = row.boxType === type ? null : type;
+        row.amount = row.boxType === "old" ? 40000 : row.boxType === "new" ? 45000 : 0;
+        saveBoxPayers();
+        render();
+      });
+    });
+
+    document.querySelectorAll(".ns-del[data-bpid]").forEach(b => {
+      b.addEventListener("click", () => {
+        const day = state.activeDay;
+        if (state.boxPayers[day]) {
+          state.boxPayers[day] = state.boxPayers[day].filter(r => r.id !== b.dataset.bpid);
+        }
+        saveBoxPayers();
         render();
       });
     });
@@ -2940,6 +3146,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       state.checklist = data.checklist || {};
       state.newStudents = data.newStudents || {};
       state.otherPayers = data.otherPayers || {};
+      state.boxPayers = data.boxPayers || {};
       render();
     }, () => {});
   }
