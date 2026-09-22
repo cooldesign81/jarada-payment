@@ -632,13 +632,16 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     if (!start || !end) return null;
     return Math.round((end.getTime() - start.getTime()) / (7*86400000)) + 1;
   }
-  function weeksLate(end, asOf, cal) {
+  function weeksLate(end, asOf, cal, dayLetter) {
     if (!end || !asOf) return 0;
     if (asOf.getTime() <= end.getTime()) return 0;
-    let candidate = addDays(end, 7);
+    const offset = DAY_OFFSET[dayLetter];
+    let candidate = addDays(end, 7); // 관리용 종료일(토) 기준 — 그 주가 대상인지 판단하는 용도
     let counted = 0, guard = 0;
     while (candidate.getTime() <= asOf.getTime() && guard < 60) {
-      if (!cal || !isBlocked(candidate, cal)) counted++;
+      // 실제로 확인해야 할 건 그 주의 '수업 요일' 날짜 (종료일은 관리 편의상 항상 토요일로 기록되어 있을 뿐, 실제 수업일이 아닐 수 있음)
+      const classDate = offset !== undefined ? addDays(mondayOf(candidate), offset) : candidate;
+      if (!cal || !isBlocked(classDate, cal)) counted++;
       candidate = addDays(candidate, 7);
       guard++;
     }
@@ -1184,7 +1187,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         teacher: r.teacher, day: r.day, time: r.time,
         endDate: fmtShort(end), endDateISO: r.endDateISO,
         session: weeksBetween(start, end) ?? "-",
-        late: weeksLate(end, nextSaturday, state.calendar),
+        late: weeksLate(end, nextSaturday, state.calendar, r.day),
         discount: r.discount,
       };
       if (!grouped[entry.day]) grouped[entry.day] = [];
