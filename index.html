@@ -767,8 +767,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     refDate: startOfDay(new Date()),
     students: null,
     checklist: {},
-    newStudents: {},
-    otherPayers: {},
+    extraPayers: {},
     boxPayers: {},
     activeDay: null,
     rawCount: 0,
@@ -922,15 +921,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         byMethod[m] = (byMethod[m] || 0) + t;
       }
     });
-    allNewStudentsFlat().forEach(r => {
-      if (r.paid && r.paidDate === today && r._day === todayLetter) {
-        const amt = Number(r.amount) || 0;
-        total += amt;
-        const m = r.method || "카드";
-        byMethod[m] = (byMethod[m] || 0) + amt;
-      }
-    });
-    allOtherPayersFlat().forEach(r => {
+    allExtraPayersFlat().forEach(r => {
       if (r.paid && r.paidDate === today && r._day === todayLetter) {
         const amt = Number(r.amount) || 0;
         total += amt;
@@ -968,23 +959,9 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
           nextTerm: nt ? `${fmtShort(nt.termStart)}~${fmtShort(nt.termEnd)}` : "-",
         };
       });
-    allNewStudentsFlat().filter(r => r.paid).forEach(r => {
+    allExtraPayersFlat().filter(r => r.paid).forEach(r => {
       rows.push({
-        day: `신규(${DAY_FULL[r._day] || r._day})`,
-        name: r.name || "",
-        age: r.age || "-",
-        teacher: "-",
-        time: "-",
-        method: r.method || "카드",
-        amount: Number(r.amount) || 0,
-        paidDate: r.paidDate || "",
-        memo: r.memo || "",
-        nextTerm: "-",
-      });
-    });
-    allOtherPayersFlat().filter(r => r.paid).forEach(r => {
-      rows.push({
-        day: `기타(${DAY_FULL[r._day] || r._day})`,
+        day: `${r.category || "신규"}(${DAY_FULL[r._day] || r._day})`,
         name: r.name || "",
         age: r.age || "-",
         teacher: "-",
@@ -1036,15 +1013,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         byMethod[m] = (byMethod[m] || 0) + t;
       }
     });
-    allNewStudentsFlat().forEach(r => {
-      if (r.paid) {
-        const amt = Number(r.amount) || 0;
-        total += amt;
-        const m = r.method || "카드";
-        byMethod[m] = (byMethod[m] || 0) + amt;
-      }
-    });
-    allOtherPayersFlat().forEach(r => {
+    allExtraPayersFlat().forEach(r => {
       if (r.paid) {
         const amt = Number(r.amount) || 0;
         total += amt;
@@ -1083,8 +1052,6 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
 
   function weekKey() { return fmt(nextWeekRange(state.refDate).nextSaturday); }
   function checklistKey() { return LS_PREFIX + "checklist_" + weekKey(); }
-  function newStudentsKey() { return LS_PREFIX + "newstudents_v2_" + weekKey(); }
-  function otherPayersKey() { return LS_PREFIX + "otherpayers_v1_" + weekKey(); }
 
   function saveRawRoster(rows, center) {
     if (!fbCenter) return;
@@ -1102,22 +1069,12 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     state.rawCount = 0;
     state.activeDay = null;
     state.checklist = {};
-    state.newStudents = {};
-    state.otherPayers = {};
+    state.extraPayers = {};
   }
 
-  function saveNewStudents() {
+  function saveExtraPayers() {
     if (!fbCenter) return;
-    centerWeekRef(weekKey()).set({ newStudents: state.newStudents }, { merge: true }).catch(() => {
-      state.message = "저장에 실패했어요 (인터넷 연결을 확인해주세요).";
-      state.messageType = "error";
-      render();
-    });
-  }
-
-  function saveOtherPayers() {
-    if (!fbCenter) return;
-    centerWeekRef(weekKey()).set({ otherPayers: state.otherPayers }, { merge: true }).catch(() => {
+    centerWeekRef(weekKey()).set({ extraPayers: state.extraPayers }, { merge: true }).catch(() => {
       state.message = "저장에 실패했어요 (인터넷 연결을 확인해주세요).";
       state.messageType = "error";
       render();
@@ -1249,28 +1206,24 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     }
     const snapshot = {
       checklist: JSON.parse(JSON.stringify(state.checklist)),
-      newStudents: JSON.parse(JSON.stringify(state.newStudents)),
-      otherPayers: JSON.parse(JSON.stringify(state.otherPayers)),
+      extraPayers: JSON.parse(JSON.stringify(state.extraPayers)),
       boxPayers: JSON.parse(JSON.stringify(state.boxPayers)),
       wk: weekKey(),
     };
     state.checklist = {};
-    state.newStudents = {};
-    state.otherPayers = {};
+    state.extraPayers = {};
     state.boxPayers = {};
     if (fbCenter) {
-      centerWeekRef(weekKey()).set({ checklist: {}, newStudents: {}, otherPayers: {}, boxPayers: {} }).catch(() => {});
+      centerWeekRef(weekKey()).set({ checklist: {}, extraPayers: {}, boxPayers: {} }).catch(() => {});
     }
     render();
     showUndoToast("🗑 체크 기록과 신규생·기타·상자 결제자를 초기화했어요", () => {
       state.checklist = snapshot.checklist;
-      state.newStudents = snapshot.newStudents;
-      state.otherPayers = snapshot.otherPayers;
+      state.extraPayers = snapshot.extraPayers;
       state.boxPayers = snapshot.boxPayers;
       if (fbCenter && weekKey() === snapshot.wk) {
         centerWeekRef(snapshot.wk).set({
-          checklist: snapshot.checklist, newStudents: snapshot.newStudents,
-          otherPayers: snapshot.otherPayers, boxPayers: snapshot.boxPayers,
+          checklist: snapshot.checklist, extraPayers: snapshot.extraPayers, boxPayers: snapshot.boxPayers,
         }).catch(() => {});
       }
       render();
@@ -1576,43 +1529,22 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     return base - discount;
   }
 
-  function allNewStudentsFlat() {
+  function allExtraPayersFlat() {
     let all = [];
-    if (!state.newStudents || Array.isArray(state.newStudents)) return all;
-    Object.keys(state.newStudents).forEach(day => {
-      const list = state.newStudents[day];
+    if (!state.extraPayers || Array.isArray(state.extraPayers)) return all;
+    Object.keys(state.extraPayers).forEach(day => {
+      const list = state.extraPayers[day];
       if (Array.isArray(list)) list.forEach(r => all.push({ ...r, _day: day }));
     });
     return all;
   }
-  function newStudentsForActiveDay() {
-    if (state.activeDay === "전체") return allNewStudentsFlat();
-    return state.newStudents[state.activeDay] || [];
+  function extraPayersForActiveDay() {
+    if (state.activeDay === "전체") return allExtraPayersFlat();
+    return state.extraPayers[state.activeDay] || [];
   }
-  function findNewStudentById(id) {
-    for (const day of Object.keys(state.newStudents)) {
-      const found = (state.newStudents[day] || []).find(r => r.id === id);
-      if (found) return found;
-    }
-    return null;
-  }
-
-  function allOtherPayersFlat() {
-    let all = [];
-    if (!state.otherPayers || Array.isArray(state.otherPayers)) return all;
-    Object.keys(state.otherPayers).forEach(day => {
-      const list = state.otherPayers[day];
-      if (Array.isArray(list)) list.forEach(r => all.push({ ...r, _day: day }));
-    });
-    return all;
-  }
-  function otherPayersForActiveDay() {
-    if (state.activeDay === "전체") return allOtherPayersFlat();
-    return state.otherPayers[state.activeDay] || [];
-  }
-  function findOtherPayerById(id) {
-    for (const day of Object.keys(state.otherPayers)) {
-      const found = (state.otherPayers[day] || []).find(r => r.id === id);
+  function findExtraPayerById(id) {
+    for (const day of Object.keys(state.extraPayers)) {
+      const found = (state.extraPayers[day] || []).find(r => r.id === id);
       if (found) return found;
     }
     return null;
@@ -1639,95 +1571,53 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     return null;
   }
 
-  function renderNewStudentsCard() {
-    const isAll = state.activeDay === "전체";
-    const rows = newStudentsForActiveDay();
-    let html = `
-      <div class="table-card newstudents-card">
-        <div class="ns-head">
-          <div class="ns-title">${isAll ? "전체" : escapeHtml(DAY_FULL[state.activeDay] || "")} 신규생</div>
-          ${isAll ? `` : `<button class="btn primary" id="nsAddBtn">+ 추가</button>`}
-        </div>
-        <div class="table-wrap"><table>
-          <thead><tr>
-            <th>NO</th>${isAll ? `<th>요일</th>` : ``}<th>이름</th><th>나이</th><th>금액</th>
-            <th class="check-head">결제</th><th class="check-head">LMS</th><th class="check-head">엑셀</th>
-            <th>결제방법</th><th>형제</th><th>장기</th><th>주의</th><th>메모</th><th></th>
-          </tr></thead>
-          <tbody>
-    `;
-    if (rows.length === 0) {
-      html += `<tr><td colspan="${isAll ? 13 : 12}" class="ns-empty">${isAll ? "등록된 신규생이 없어요." : `신규 등록 학생이 있으면 "+ 추가"를 눌러주세요.`}</td></tr>`;
-    }
-    rows.forEach((r, i) => {
-      html += `
-        <tr>
-          <td class="no-cell">${i + 1}</td>
-          ${isAll ? `<td class="mono">${escapeHtml(r._day)}</td>` : ``}
-          <td><input class="ns-input" data-nsid="${r.id}" data-field="name" value="${escapeHtml(r.name)}" placeholder="이름" ${isAll ? "readonly" : ""} /></td>
-          <td><input class="ns-input ns-num" data-nsid="${r.id}" data-field="age" type="number" value="${r.age}" ${isAll ? "readonly" : ""} /></td>
-          <td><input class="ns-input ns-num" data-nsid="${r.id}" data-field="amount" type="text" value="${formatManwon(Number(r.amount) || 0)}" ${isAll ? "readonly" : ""} /></td>
-          <td><button class="checkbtn ${r.paid ? "on" : ""}" data-nsid="${r.id}" data-nsfield="paid" ${isAll ? "disabled" : ""}>${r.paid ? "✓" : ""}</button></td>
-          <td><button class="checkbtn ${r.lms ? "on" : ""}" data-nsid="${r.id}" data-nsfield="lms" ${isAll ? "disabled" : ""}>${r.lms ? "✓" : ""}</button></td>
-          <td><button class="checkbtn ${r.excel ? "on" : ""}" data-nsid="${r.id}" data-nsfield="excel" ${isAll ? "disabled" : ""}>${r.excel ? "✓" : ""}</button></td>
-          <td>
-            <select class="pay-select ${r.paid ? "" : "unpaid-hide"}" data-nsid="${r.id}" data-field="method" ${isAll ? "disabled" : ""}>
-              ${PAY_METHODS.map(m => `<option value="${m}" ${r.method === m ? "selected" : ""}>${m}</option>`).join("")}
-            </select>
-          </td>
-          <td><button class="ns-toggle ${r.sibling ? "on" : ""}" data-nsid="${r.id}" data-toggle="sibling" ${isAll ? "disabled" : ""}>형제</button></td>
-          <td><button class="ns-toggle ${r.longterm ? "on" : ""}" data-nsid="${r.id}" data-toggle="longterm" ${isAll ? "disabled" : ""}>장기</button></td>
-          <td class="ns-warn">LMS에서 반배정 및 결제등록해주세요.</td>
-          <td><input class="ns-input" data-nsid="${r.id}" data-field="memo" placeholder="메모" value="${escapeHtml(r.memo || "")}" ${isAll ? "readonly" : ""} /></td>
-          <td>${isAll ? `` : `<button class="ns-del" data-nsid="${r.id}" title="삭제">✕</button>`}</td>
-        </tr>
-      `;
-    });
-    html += `</tbody></table></div></div>`;
-    return html;
-  }
+  const EXTRA_CATEGORIES = ["신규생", "샘플 후 등록", "다른 요일", "기타"];
 
-  function renderOtherPayersCard() {
+  function renderExtraPayersCard() {
     const isAll = state.activeDay === "전체";
-    const rows = otherPayersForActiveDay();
+    const rows = extraPayersForActiveDay();
     let html = `
       <div class="table-card newstudents-card">
         <div class="ns-head">
-          <div class="ns-title">${isAll ? "전체" : escapeHtml(DAY_FULL[state.activeDay] || "")} 기타 결제자</div>
-          ${isAll ? `` : `<button class="btn primary" id="opAddBtn">+ 추가</button>`}
+          <div class="ns-title">${isAll ? "전체" : escapeHtml(DAY_FULL[state.activeDay] || "")} 신규생·기타 결제자</div>
+          ${isAll ? `` : `<button class="btn primary" id="epAddBtn">+ 추가</button>`}
         </div>
         <div class="table-wrap"><table>
           <thead><tr>
             <th>NO</th>${isAll ? `<th>요일</th>` : ``}<th>이름</th><th>나이</th><th>금액</th>
             <th class="check-head">결제</th><th class="check-head">LMS</th><th class="check-head">엑셀</th>
-            <th>결제방법</th><th>형제</th><th>장기</th><th>주의</th><th>메모</th><th></th>
+            <th>결제방법</th><th>형제</th><th>장기</th><th>분류</th><th>메모</th><th></th>
           </tr></thead>
           <tbody>
     `;
     if (rows.length === 0) {
-      html += `<tr><td colspan="${isAll ? 13 : 12}" class="ns-empty">${isAll ? "등록된 기타 결제자가 없어요." : `기타 결제자가 있으면 "+ 추가"를 눌러주세요.`}</td></tr>`;
+      html += `<tr><td colspan="${isAll ? 13 : 12}" class="ns-empty">${isAll ? "등록된 신규생·기타 결제자가 없어요." : `신규생·기타 결제자가 있으면 "+ 추가"를 눌러주세요.`}</td></tr>`;
     }
     rows.forEach((r, i) => {
       html += `
         <tr>
           <td class="no-cell">${i + 1}</td>
           ${isAll ? `<td class="mono">${escapeHtml(r._day)}</td>` : ``}
-          <td><input class="ns-input" data-opid="${r.id}" data-field="name" value="${escapeHtml(r.name)}" placeholder="이름" ${isAll ? "readonly" : ""} /></td>
-          <td><input class="ns-input ns-num" data-opid="${r.id}" data-field="age" type="number" value="${r.age}" ${isAll ? "readonly" : ""} /></td>
-          <td><input class="ns-input ns-num" data-opid="${r.id}" data-field="amount" type="text" value="${formatManwon(Number(r.amount) || 0)}" ${isAll ? "readonly" : ""} /></td>
-          <td><button class="checkbtn ${r.paid ? "on" : ""}" data-opid="${r.id}" data-opfield="paid" ${isAll ? "disabled" : ""}>${r.paid ? "✓" : ""}</button></td>
-          <td><button class="checkbtn ${r.lms ? "on" : ""}" data-opid="${r.id}" data-opfield="lms" ${isAll ? "disabled" : ""}>${r.lms ? "✓" : ""}</button></td>
-          <td><button class="checkbtn ${r.excel ? "on" : ""}" data-opid="${r.id}" data-opfield="excel" ${isAll ? "disabled" : ""}>${r.excel ? "✓" : ""}</button></td>
+          <td><input class="ns-input" data-epid="${r.id}" data-field="name" value="${escapeHtml(r.name)}" placeholder="이름" ${isAll ? "readonly" : ""} /></td>
+          <td><input class="ns-input ns-num" data-epid="${r.id}" data-field="age" type="number" value="${r.age}" ${isAll ? "readonly" : ""} /></td>
+          <td><input class="ns-input ns-num" data-epid="${r.id}" data-field="amount" type="text" value="${formatManwon(Number(r.amount) || 0)}" ${isAll ? "readonly" : ""} /></td>
+          <td><button class="checkbtn ${r.paid ? "on" : ""}" data-epid="${r.id}" data-epfield="paid" ${isAll ? "disabled" : ""}>${r.paid ? "✓" : ""}</button></td>
+          <td><button class="checkbtn ${r.lms ? "on" : ""}" data-epid="${r.id}" data-epfield="lms" ${isAll ? "disabled" : ""}>${r.lms ? "✓" : ""}</button></td>
+          <td><button class="checkbtn ${r.excel ? "on" : ""}" data-epid="${r.id}" data-epfield="excel" ${isAll ? "disabled" : ""}>${r.excel ? "✓" : ""}</button></td>
           <td>
-            <select class="pay-select ${r.paid ? "" : "unpaid-hide"}" data-opid="${r.id}" data-field="method" ${isAll ? "disabled" : ""}>
+            <select class="pay-select ${r.paid ? "" : "unpaid-hide"}" data-epid="${r.id}" data-field="method" ${isAll ? "disabled" : ""}>
               ${PAY_METHODS.map(m => `<option value="${m}" ${r.method === m ? "selected" : ""}>${m}</option>`).join("")}
             </select>
           </td>
-          <td><button class="ns-toggle ${r.sibling ? "on" : ""}" data-opid="${r.id}" data-toggle="sibling" ${isAll ? "disabled" : ""}>형제</button></td>
-          <td><button class="ns-toggle ${r.longterm ? "on" : ""}" data-opid="${r.id}" data-toggle="longterm" ${isAll ? "disabled" : ""}>장기</button></td>
-          <td class="ns-warn">LMS에서 반배정 및 결제등록해주세요.</td>
-          <td><input class="ns-input" data-opid="${r.id}" data-field="memo" placeholder="메모" value="${escapeHtml(r.memo || "")}" ${isAll ? "readonly" : ""} /></td>
-          <td>${isAll ? `` : `<button class="ns-del" data-opid="${r.id}" title="삭제">✕</button>`}</td>
+          <td><button class="ns-toggle ${r.sibling ? "on" : ""}" data-epid="${r.id}" data-toggle="sibling" ${isAll ? "disabled" : ""}>형제</button></td>
+          <td><button class="ns-toggle ${r.longterm ? "on" : ""}" data-epid="${r.id}" data-toggle="longterm" ${isAll ? "disabled" : ""}>장기</button></td>
+          <td>
+            <select class="pay-select category-select" data-epid="${r.id}" data-field="category" ${isAll ? "disabled" : ""}>
+              ${EXTRA_CATEGORIES.map(c => `<option value="${c}" ${(r.category || "신규생") === c ? "selected" : ""}>${c}</option>`).join("")}
+            </select>
+          </td>
+          <td><input class="ns-input" data-epid="${r.id}" data-field="memo" placeholder="메모" value="${escapeHtml(r.memo || "")}" ${isAll ? "readonly" : ""} /></td>
+          <td>${isAll ? `` : `<button class="ns-del" data-epid="${r.id}" title="삭제">✕</button>`}</td>
         </tr>
       `;
     });
@@ -1948,8 +1838,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       html += `<div class="footer-note">체크 상태는 이 브라우저(${weekKey()} 기준 주차)에 자동 저장돼요. 다른 PC로 옮기거나 안전하게 백업하려면 "백업 저장"을 눌러 파일로 내려받아두세요.</div>`;
       html += `<div class="capture-hint">할인 열은 업로드한 파일의 '관리그룹' 값을 그대로 보여줘요.</div>`;
 
-      html += renderNewStudentsCard();
-      html += renderOtherPayersCard();
+      html += renderExtraPayersCard();
       html += renderBoxPayersCard();
       html += renderRevenueCard();
       html += `</div>`;
@@ -2102,150 +1991,76 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     const exportRevenueBtn = document.getElementById("exportRevenueBtn");
     if (exportRevenueBtn) exportRevenueBtn.addEventListener("click", exportWeekRevenueCsv);
 
-    const nsAddBtn = document.getElementById("nsAddBtn");
-    if (nsAddBtn) nsAddBtn.addEventListener("click", () => {
+    const epAddBtn = document.getElementById("epAddBtn");
+    if (epAddBtn) epAddBtn.addEventListener("click", () => {
       if (state.activeDay === "전체") return;
-      if (!state.newStudents[state.activeDay]) state.newStudents[state.activeDay] = [];
-      state.newStudents[state.activeDay].push({
-        id: "ns_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7),
+      if (!state.extraPayers[state.activeDay]) state.extraPayers[state.activeDay] = [];
+      state.extraPayers[state.activeDay].push({
+        id: "ep_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7),
         name: "", age: "", amount: Number(state.tuitionSettings.base) || 0,
         paid: false, lms: false, excel: false, method: "카드",
-        sibling: false, longterm: false, memo: "", paidDate: null,
+        sibling: false, longterm: false, category: "신규생", memo: "", paidDate: null,
       });
-      saveNewStudents();
+      saveExtraPayers();
       render();
     });
 
-    const opAddBtn = document.getElementById("opAddBtn");
-    if (opAddBtn) opAddBtn.addEventListener("click", () => {
-      if (state.activeDay === "전체") return;
-      if (!state.otherPayers[state.activeDay]) state.otherPayers[state.activeDay] = [];
-      state.otherPayers[state.activeDay].push({
-        id: "op_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7),
-        name: "", age: "", amount: Number(state.tuitionSettings.base) || 0,
-        paid: false, lms: false, excel: false, method: "카드",
-        sibling: false, longterm: false, memo: "", paidDate: null,
-      });
-      saveOtherPayers();
-      render();
-    });
-
-    document.querySelectorAll(".ns-input[data-nsid]").forEach(inp => {
+    document.querySelectorAll(".ns-input[data-epid]").forEach(inp => {
       inp.addEventListener("blur", () => {
-        const row = findNewStudentById(inp.dataset.nsid);
+        const row = findExtraPayerById(inp.dataset.epid);
         if (!row) return;
         const field = inp.dataset.field;
         if (field === "amount") {
           row.amount = parseWonInput(inp.value);
-          saveNewStudents();
+          saveExtraPayers();
           render();
         } else {
           row[field] = inp.value;
-          saveNewStudents();
+          saveExtraPayers();
         }
       });
     });
 
-    document.querySelectorAll(".ns-input[data-opid]").forEach(inp => {
-      inp.addEventListener("blur", () => {
-        const row = findOtherPayerById(inp.dataset.opid);
-        if (!row) return;
-        const field = inp.dataset.field;
-        if (field === "amount") {
-          row.amount = parseWonInput(inp.value);
-          saveOtherPayers();
-          render();
-        } else {
-          row[field] = inp.value;
-          saveOtherPayers();
-        }
-      });
-    });
-
-    document.querySelectorAll(".pay-select[data-nsid]").forEach(sel => {
+    document.querySelectorAll(".pay-select[data-epid]").forEach(sel => {
       sel.addEventListener("change", () => {
-        const row = findNewStudentById(sel.dataset.nsid);
+        const row = findExtraPayerById(sel.dataset.epid);
         if (!row) return;
-        row.method = sel.value;
-        saveNewStudents();
+        row[sel.dataset.field] = sel.value;
+        saveExtraPayers();
       });
     });
 
-    document.querySelectorAll(".pay-select[data-opid]").forEach(sel => {
-      sel.addEventListener("change", () => {
-        const row = findOtherPayerById(sel.dataset.opid);
-        if (!row) return;
-        row.method = sel.value;
-        saveOtherPayers();
-      });
-    });
-
-    document.querySelectorAll(".checkbtn[data-nsfield]").forEach(b => {
+    document.querySelectorAll(".checkbtn[data-epfield]").forEach(b => {
       b.addEventListener("click", () => {
-        const row = findNewStudentById(b.dataset.nsid);
+        const row = findExtraPayerById(b.dataset.epid);
         if (!row) return;
-        const field = b.dataset.nsfield;
+        const field = b.dataset.epfield;
         row[field] = !row[field];
         if (field === "paid") row.paidDate = row.paid ? fmt(new Date()) : null;
-        saveNewStudents();
+        saveExtraPayers();
         render();
       });
     });
 
-    document.querySelectorAll(".checkbtn[data-opfield]").forEach(b => {
+    document.querySelectorAll(".ns-toggle[data-epid]").forEach(b => {
       b.addEventListener("click", () => {
-        const row = findOtherPayerById(b.dataset.opid);
-        if (!row) return;
-        const field = b.dataset.opfield;
-        row[field] = !row[field];
-        if (field === "paid") row.paidDate = row.paid ? fmt(new Date()) : null;
-        saveOtherPayers();
-        render();
-      });
-    });
-
-    document.querySelectorAll(".ns-toggle[data-nsid]").forEach(b => {
-      b.addEventListener("click", () => {
-        const row = findNewStudentById(b.dataset.nsid);
+        const row = findExtraPayerById(b.dataset.epid);
         if (!row) return;
         const key = b.dataset.toggle;
         row[key] = !row[key];
         row.amount = computeNewStudentAmount(row);
-        saveNewStudents();
+        saveExtraPayers();
         render();
       });
     });
 
-    document.querySelectorAll(".ns-toggle[data-opid]").forEach(b => {
-      b.addEventListener("click", () => {
-        const row = findOtherPayerById(b.dataset.opid);
-        if (!row) return;
-        const key = b.dataset.toggle;
-        row[key] = !row[key];
-        row.amount = computeNewStudentAmount(row);
-        saveOtherPayers();
-        render();
-      });
-    });
-
-    document.querySelectorAll(".ns-del[data-nsid]").forEach(b => {
+    document.querySelectorAll(".ns-del[data-epid]").forEach(b => {
       b.addEventListener("click", () => {
         const day = state.activeDay;
-        if (state.newStudents[day]) {
-          state.newStudents[day] = state.newStudents[day].filter(r => r.id !== b.dataset.nsid);
+        if (state.extraPayers[day]) {
+          state.extraPayers[day] = state.extraPayers[day].filter(r => r.id !== b.dataset.epid);
         }
-        saveNewStudents();
-        render();
-      });
-    });
-
-    document.querySelectorAll(".ns-del[data-opid]").forEach(b => {
-      b.addEventListener("click", () => {
-        const day = state.activeDay;
-        if (state.otherPayers[day]) {
-          state.otherPayers[day] = state.otherPayers[day].filter(r => r.id !== b.dataset.opid);
-        }
-        saveOtherPayers();
+        saveExtraPayers();
         render();
       });
     });
@@ -3147,9 +2962,25 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       if (weekKey() !== wk) return; // 그 사이 날짜가 바뀌었으면 무시
       const data = doc.exists ? doc.data() : {};
       state.checklist = data.checklist || {};
-      state.newStudents = data.newStudents || {};
-      state.otherPayers = data.otherPayers || {};
       state.boxPayers = data.boxPayers || {};
+
+      // 신규생·기타 결제자 통합: 예전 버전 데이터(newStudents/otherPayers)가 남아있으면
+      // 한 번만 extraPayers로 합쳐서 저장하고, 예전 필드는 비움
+      if (data.extraPayers) {
+        state.extraPayers = data.extraPayers;
+      } else if ((data.newStudents && Object.keys(data.newStudents).length) || (data.otherPayers && Object.keys(data.otherPayers).length)) {
+        const merged = {};
+        Object.keys(data.newStudents || {}).forEach(day => {
+          merged[day] = (merged[day] || []).concat((data.newStudents[day] || []).map(r => ({ ...r, category: r.category || "신규생" })));
+        });
+        Object.keys(data.otherPayers || {}).forEach(day => {
+          merged[day] = (merged[day] || []).concat((data.otherPayers[day] || []).map(r => ({ ...r, category: r.category || "기타" })));
+        });
+        state.extraPayers = merged;
+        centerWeekRef(wk).set({ extraPayers: merged, newStudents: {}, otherPayers: {} }, { merge: true }).catch(() => {});
+      } else {
+        state.extraPayers = {};
+      }
       render();
     }, () => {});
   }
