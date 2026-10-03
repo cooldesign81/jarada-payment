@@ -907,6 +907,11 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     return map[new Date().getDay()];
   }
 
+  // 매출 요약 합산에서 제외할 분류 — 신규생 결제는 LMS에서 별도 등록되므로 합산하지 않음
+  function isNewStudentPayer(r) {
+    return (r.category || "신규생") === "신규생";
+  }
+
   function todayRevenue() {
     const today = fmt(new Date());
     const todayLetter = todayDayLetter();
@@ -922,6 +927,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       }
     });
     allExtraPayersFlat().forEach(r => {
+      if (isNewStudentPayer(r)) return;
       if (r.paid && r.paidDate === today && r._day === todayLetter) {
         const amt = Number(r.amount) || 0;
         total += amt;
@@ -959,7 +965,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
           nextTerm: nt ? `${fmtShort(nt.termStart)}~${fmtShort(nt.termEnd)}` : "-",
         };
       });
-    allExtraPayersFlat().filter(r => r.paid).forEach(r => {
+    allExtraPayersFlat().filter(r => r.paid && !isNewStudentPayer(r)).forEach(r => {
       rows.push({
         day: `${r.category || "신규"}(${DAY_FULL[r._day] || r._day})`,
         name: r.name || "",
@@ -1014,6 +1020,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       }
     });
     allExtraPayersFlat().forEach(r => {
+      if (isNewStudentPayer(r)) return;
       if (r.paid) {
         const amt = Number(r.amount) || 0;
         total += amt;
@@ -1697,6 +1704,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
           <div class="revenue-breakdown">${methodRow(weekByMethod)}</div>
         </div>
         <div class="sms-hint" style="color:rgba(255,255,255,.55);">현재 불러온 명단의 결제 체크 상태를 실시간으로 더한 값이에요. 별도로 저장되지 않아요.</div>
+        <div class="sms-hint" style="color:rgba(255,255,255,.55);">신규생 결제는 합산되지 않습니다.</div>
       </div>
     `;
   }
