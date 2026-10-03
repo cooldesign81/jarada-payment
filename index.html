@@ -965,7 +965,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
           nextTerm: nt ? `${fmtShort(nt.termStart)}~${fmtShort(nt.termEnd)}` : "-",
         };
       });
-    allExtraPayersFlat().filter(r => r.paid).forEach(r => {
+    allExtraPayersFlat().filter(r => r.paid && !isNewStudentPayer(r)).forEach(r => {
       rows.push({
         day: `${r.category || "신규"}(${DAY_FULL[r._day] || r._day})`,
         name: r.name || "",
