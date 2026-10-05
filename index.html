@@ -184,6 +184,10 @@
   .sheet-sync-status { font-size: 12px; color: rgba(255,255,255,.55); }
   .sheet-sync-status.ok { color: #9fe3b4; }
   .sheet-sync-status.error { color: #ffb4a8; }
+  .sheet-sync-status.partial { color: #ffd59e; }
+  .sh-target { display: flex; flex-direction: column; gap: 6px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); }
+  .sh-target-head { display: flex; align-items: center; gap: 8px; }
+  .sh-target-head .sh-label { flex: 1; min-width: 0; }
   .revenue-card .btn.ghost {
     background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.28); color: rgba(255,255,255,.9);
   }
@@ -816,8 +820,28 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     if (fbCenter) centerConfigRef().set({ smsSettings: s }, { merge: true }).catch(() => {});
   }
 
-  // 구글 시트 연동 설정 — 원마다 다른 시트를 쓰므로 Firestore 센터 설정에만 저장 (브라우저 localStorage에는 남기지 않음)
-  const DEFAULT_SHEET_SETTINGS = { url: "", token: "", auto: true };
+  // 구글 시트 연동 설정 — 시트 여러 개(우리 원 시트 + 대표 시트 …)에 같은 내용을 동시에 기록
+  // 원마다 다른 시트를 쓰므로 Firestore 센터 설정에만 저장 (브라우저 localStorage에는 남기지 않음)
+  const DEFAULT_SHEET_TARGETS = [
+    { label: "우리 원 시트", url: "", token: "" },
+    { label: "대표 시트", url: "", token: "" },
+  ];
+  function normalizeSheetSettings(raw) {
+    const d = raw || {};
+    let targets = Array.isArray(d.targets) ? d.targets : [];
+    // 예전 형식(url/token 한 개)은 첫 번째 시트로 옮김
+    if (!targets.length && String(d.url || "").trim()) targets = [{ label: "우리 원 시트", url: d.url, token: d.token || "" }];
+    targets = targets.map((t, i) => ({
+      label: String((t && t.label) || "").trim() || `시트 ${i + 1}`,
+      url: String((t && t.url) || "").trim(),
+      token: String((t && t.token) || "").trim(),
+    }));
+    return { targets, auto: d.auto !== false };
+  }
+  function activeSheetTargets(settings) {
+    const sh = settings || state.sheetSettings || {};
+    return (sh.targets || []).filter(t => t && String(t.url || "").trim());
+  }
   function saveSheetSettings(sh) {
     if (fbCenter) centerConfigRef().set({ sheetSettings: sh }, { merge: true }).catch(() => {});
   }
@@ -844,8 +868,8 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   state.smsTitle = loadSmsTitle();
   state.calendar = loadCalendar();
   state.tuitionSettings = loadTuitionSettings();
-  state.sheetSettings = { ...DEFAULT_SHEET_SETTINGS };
-  state.sheetSync = { status: "idle", at: null, message: "" };
+  state.sheetSettings = normalizeSheetSettings(null);
+  state.sheetSync = { status: "idle", at: null, message: "", results: [] };
   state.calendarOpen = false;
   state.newHolidayDate = "";
   state.newHolidayLabel = "";
@@ -1033,14 +1057,14 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   }
 
   // ---- 구글 시트 연동 (Apps Script 웹앱으로 이번 주 결제 완료 행을 통째로 보내 시트에서 추가/갱신/삭제) ----
+  // 설정된 시트(우리 원 시트, 대표 시트 …) 모두에 같은 내용을 보냄
   function sheetSyncReady(settings) {
-    const sh = settings || state.sheetSettings || {};
-    return !!(fbCenter && (sh.url || "").trim());
+    return !!(fbCenter && activeSheetTargets(settings).length);
   }
 
-  async function postToSheet(payload, settings) {
-    const sh = settings || state.sheetSettings || {};
-    const url = (sh.url || "").trim();
+  async function postToSheet(payload, target) {
+    const t = target || {};
+    const url = String(t.url || "").trim();
     if (!/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec$/.test(url)) {
       throw new Error("웹앱 URL 형식이 아니에요 (…/exec 로 끝나는 주소)");
     }
@@ -1048,7 +1072,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       method: "POST",
       // JSON 타입으로 보내면 CORS 사전요청에 걸리므로 text/plain으로 보내고 Apps Script에서 파싱
       headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify({ ...payload, token: sh.token || "" }),
+      body: JSON.stringify({ ...payload, token: t.token || "" }),
       redirect: "follow",
     });
     let data = null;
@@ -1077,21 +1101,34 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     }
     if (sheetSyncInFlight) { sheetSyncAgain = true; return; }
     sheetSyncInFlight = true;
-    state.sheetSync = { status: "sending", at: Date.now(), message: "" };
+    state.sheetSync = { status: "sending", at: Date.now(), message: "", results: [] };
     renderSheetSyncStatus();
     const rows = buildRevenueRows();
+    const targets = activeSheetTargets();
+    const payload = { action: "sync", center: fbCenter, week: weekKey(), rows, sentAt: new Date().toISOString() };
     try {
-      const r = await postToSheet({
-        action: "sync", center: fbCenter, week: weekKey(), rows, sentAt: new Date().toISOString(),
-      });
-      state.sheetSync = {
-        status: "ok", at: Date.now(),
-        message: `${rows.length}건 (추가/갱신 ${r.upserted ?? 0}, 삭제 ${r.deleted ?? 0})`,
-      };
-      if (manual) showToast(`📊 구글 시트에 ${rows.length}건 기록했어요`);
-    } catch (e) {
-      state.sheetSync = { status: "error", at: Date.now(), message: e.message || String(e) };
-      if (manual) showToast("❌ 구글 시트 기록 실패: " + state.sheetSync.message);
+      // 시트마다 따로 보내고, 하나가 실패해도 나머지는 계속 진행
+      const results = await Promise.all(targets.map(async t => {
+        try {
+          const r = await postToSheet(payload, t);
+          return { label: t.label, ok: true, message: `추가/갱신 ${r.upserted ?? 0}, 삭제 ${r.deleted ?? 0}` };
+        } catch (e) {
+          return { label: t.label, ok: false, message: e.message || String(e) };
+        }
+      }));
+      const failed = results.filter(r => !r.ok);
+      const okLabels = results.filter(r => r.ok).map(r => r.label);
+      if (!failed.length) {
+        state.sheetSync = { status: "ok", at: Date.now(), results, message: `${rows.length}건 → ${okLabels.join(", ")}` };
+        if (manual) showToast(`📊 구글 시트 ${results.length}곳에 ${rows.length}건 기록했어요`);
+      } else {
+        const detail = failed.map(f => `${f.label} ✗ ${f.message}`).join(" · ");
+        state.sheetSync = {
+          status: failed.length === results.length ? "error" : "partial", at: Date.now(), results,
+          message: (okLabels.length ? okLabels.map(l => `${l} ✓`).join(" · ") + " · " : "") + detail,
+        };
+        if (manual) showToast(`❌ 시트 기록 실패: ${detail}`);
+      }
     } finally {
       sheetSyncInFlight = false;
       renderSheetSyncStatus();
@@ -1106,8 +1143,12 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     if (!sheetSyncReady()) return "구글 시트 연동 전이에요. ⚙ 설정에서 웹앱 URL을 입력하면 자동으로 기록돼요.";
     if (ss.status === "sending") return "구글 시트에 기록하는 중…";
     if (ss.status === "ok") return `구글 시트 기록 완료 · ${when} · ${ss.message}`;
+    if (ss.status === "partial") return `구글 시트 일부 실패 · ${when} · ${ss.message}`;
     if (ss.status === "error") return `구글 시트 기록 실패 · ${when} · ${ss.message}`;
-    return sh.auto === false ? "구글 시트: 자동 기록 꺼짐 (버튼으로 수동 기록)" : "구글 시트 자동 기록 켜짐 · 결제 체크가 바뀌면 몇 초 뒤 기록돼요.";
+    const names = activeSheetTargets().map(t => t.label).join(", ");
+    return sh.auto === false
+      ? `구글 시트(${names}): 자동 기록 꺼짐 (버튼으로 수동 기록)`
+      : `구글 시트(${names}) 자동 기록 켜짐 · 결제 체크가 바뀌면 몇 초 뒤 기록돼요.`;
   }
 
   function renderSheetSyncStatus() {
@@ -1188,8 +1229,8 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     state.activeDay = null;
     state.checklist = {};
     state.extraPayers = {};
-    state.sheetSettings = { ...DEFAULT_SHEET_SETTINGS };
-    state.sheetSync = { status: "idle", at: null, message: "" };
+    state.sheetSettings = normalizeSheetSettings(null);
+    state.sheetSync = { status: "idle", at: null, message: "", results: [] };
     clearTimeout(sheetSyncTimer);
   }
 
@@ -2027,7 +2068,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     const smsSettingsOpenBtn = document.getElementById("smsSettingsOpenBtn");
     if (smsSettingsOpenBtn) smsSettingsOpenBtn.addEventListener("click", () => {
       document.getElementById("smsSettingsModal").classList.add("open");
-      renderSmsSettingsBox();
+      renderSmsSettingsBox({ fresh: true });
     });
 
     const reservedSmsOpenBtn = document.getElementById("reservedSmsOpenBtn");
@@ -2299,7 +2340,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     const smsPanelSettingsBtn = document.getElementById("smsPanelSettingsBtn");
     if (smsPanelSettingsBtn) smsPanelSettingsBtn.addEventListener("click", () => {
       document.getElementById("smsSettingsModal").classList.add("open");
-      renderSmsSettingsBox();
+      renderSmsSettingsBox({ fresh: true });
     });
 
     const smsTitle = document.getElementById("smsTitle");
@@ -2428,12 +2469,28 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     document.getElementById("captureModal").classList.remove("open");
   }
 
-  function renderSmsSettingsBox() {
+  // 설정창에서 저장 전 편집 중인 시트 목록 (시트 추가/제거로 다시 그릴 때 입력 내용을 잃지 않게)
+  let sheetDraft = null;
+  function readSheetTargetsFromDom() {
+    const wrap = document.getElementById("shTargets");
+    if (!wrap) return null;
+    return Array.from(wrap.querySelectorAll(".sh-target")).map(el => ({
+      label: el.querySelector(".sh-label").value.trim(),
+      url: el.querySelector(".sh-url").value.trim(),
+      token: el.querySelector(".sh-token").value.trim(),
+    }));
+  }
+
+  function renderSmsSettingsBox(opts) {
     const box = document.getElementById("smsSettingsBox");
     if (!box) return;
     const set = state.smsSettings;
     const t = state.tuitionSettings;
-    const sh = state.sheetSettings || DEFAULT_SHEET_SETTINGS;
+    const sh = state.sheetSettings || normalizeSheetSettings(null);
+    if (opts && opts.fresh) sheetDraft = null;
+    else { const fromDom = readSheetTargetsFromDom(); if (fromDom) sheetDraft = fromDom; }
+    if (!sheetDraft) sheetDraft = sh.targets.length ? sh.targets.map(x => ({ ...x })) : DEFAULT_SHEET_TARGETS.map(x => ({ ...x }));
+    const targets = sheetDraft;
     box.innerHTML = `
       <div class="capture-actions" style="justify-content: space-between; margin-bottom: 4px;">
         <div class="sms-title">⚙ 설정</div>
@@ -2467,21 +2524,31 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
 
       <div class="sms-section" style="border-top: 1px solid var(--line); padding-top: 14px;">
         <div class="sms-section-title">구글 시트 연동 (매출 기록 자동 누적)</div>
-        <div class="cal-add-row" style="flex-direction: column; align-items: stretch; gap: 10px;">
-          <input id="shUrl" class="sms-input" placeholder="Apps Script 웹앱 URL (https://script.google.com/macros/s/…/exec)" value="${escapeHtml(sh.url || "")}" />
-          <input id="shToken" class="sms-input" placeholder="비밀 토큰 (Apps Script 스크립트 속성 TOKEN 값과 같게)" value="${escapeHtml(sh.token || "")}" />
-          <label class="tuition-row"><input id="shAuto" type="checkbox" ${sh.auto === false ? "" : "checked"} /> 결제 체크·메모·결제방법이 바뀌면 자동으로 시트에 기록</label>
-          <div style="display:flex; gap:8px; flex-wrap:wrap;">
-            <button class="btn primary" id="shSaveBtn">저장</button>
-            <button class="btn" id="shTestBtn">연결 테스트</button>
-          </div>
+        <div class="sms-hint" style="margin-bottom:10px;">시트를 여러 개 넣으면 같은 내용이 모두에 기록돼요. 예: ① 우리 원 구글 계정의 시트(원 관리자용), ② 대표 계정의 시트(세 원이 모두 모임). 시트마다 URL과 토큰이 달라요.</div>
+        <div id="shTargets" class="cal-add-row" style="flex-direction: column; align-items: stretch; gap: 10px;">
+          ${targets.map((tg, i) => `
+          <div class="sh-target" data-idx="${i}">
+            <div class="sh-target-head">
+              <input class="sms-input sh-label" placeholder="이름 (예: 우리 원 시트)" value="${escapeHtml(tg.label || "")}" />
+              <button class="btn sh-test" data-idx="${i}">연결 테스트</button>
+              <button class="ns-del sh-del" data-idx="${i}" title="이 시트 제거">✕</button>
+            </div>
+            <input class="sms-input sh-url" placeholder="Apps Script 웹앱 URL (https://script.google.com/macros/s/…/exec)" value="${escapeHtml(tg.url || "")}" />
+            <input class="sms-input sh-token" placeholder="비밀 토큰 (그 시트 Apps Script의 스크립트 속성 TOKEN 값)" value="${escapeHtml(tg.token || "")}" />
+          </div>`).join("")}
         </div>
-        <div class="sms-hint">시트 만들기와 웹앱 배포 방법은 저장소의 google-sheets/README.md에 있어요. 이 설정은 이 원(${escapeHtml(fbCenter || "")}) 계정으로 공유돼요. 이번 주 결제 완료 행을 통째로 보내 시트에서 같은 기록은 갱신하고, 결제를 취소한 행은 지워요. 신규생 분류 결제는 매출 요약과 마찬가지로 시트에도 기록되지 않아요.</div>
+        <div class="cal-add-row" style="flex-direction: column; align-items: stretch; gap: 10px; margin-top: 10px;">
+          <div><button class="btn" id="shAddBtn">+ 시트 추가</button></div>
+          <label class="tuition-row"><input id="shAuto" type="checkbox" ${sh.auto === false ? "" : "checked"} /> 결제 체크·메모·결제방법이 바뀌면 자동으로 시트에 기록</label>
+          <div><button class="btn primary" id="shSaveBtn">저장</button></div>
+        </div>
+        <div class="sms-hint">시트 만들기와 웹앱 배포 방법은 저장소의 google-sheets/README.md에 있어요. 이 설정은 이 원(${escapeHtml(fbCenter || "")}) 계정으로 공유돼요. URL이 비어 있는 줄은 저장되지 않아요. 이번 주 결제 완료 행을 통째로 보내 시트에서 같은 기록은 갱신하고, 결제를 취소한 행은 지워요. 신규생 분류 결제는 매출 요약과 마찬가지로 시트에도 기록되지 않아요.</div>
       </div>
     `;
     const closeBtn = document.getElementById("smsSettingsCloseBtn");
     if (closeBtn) closeBtn.addEventListener("click", () => {
       document.getElementById("smsSettingsModal").classList.remove("open");
+      sheetDraft = null;
     });
     const saveBtn = document.getElementById("stSaveBtn");
     if (saveBtn) saveBtn.addEventListener("click", () => {
@@ -2510,34 +2577,47 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       showToast("✅ 원 설정을 저장했어요");
       render();
     });
-    const readSheetInputs = () => ({
-      url: document.getElementById("shUrl").value.trim(),
-      token: document.getElementById("shToken").value.trim(),
-      auto: document.getElementById("shAuto").checked,
+    const shAddBtn = document.getElementById("shAddBtn");
+    if (shAddBtn) shAddBtn.addEventListener("click", () => {
+      sheetDraft = readSheetTargetsFromDom() || [];
+      sheetDraft.push({ label: `시트 ${sheetDraft.length + 1}`, url: "", token: "" });
+      renderSmsSettingsBox();
     });
+    box.querySelectorAll(".sh-del").forEach(b => b.addEventListener("click", () => {
+      sheetDraft = readSheetTargetsFromDom() || [];
+      sheetDraft.splice(Number(b.dataset.idx), 1);
+      renderSmsSettingsBox();
+    }));
     const shSaveBtn = document.getElementById("shSaveBtn");
     if (shSaveBtn) shSaveBtn.addEventListener("click", () => {
-      state.sheetSettings = readSheetInputs();
+      const draft = readSheetTargetsFromDom() || [];
+      state.sheetSettings = normalizeSheetSettings({
+        targets: draft.filter(x => x.url),
+        auto: document.getElementById("shAuto").checked,
+      });
       saveSheetSettings(state.sheetSettings);
-      state.sheetSync = { status: "idle", at: null, message: "" };
-      showToast("✅ 구글 시트 연동 설정을 저장했어요");
+      state.sheetSync = { status: "idle", at: null, message: "", results: [] };
+      sheetDraft = null;
+      showToast(`✅ 구글 시트 연동 설정을 저장했어요 (시트 ${state.sheetSettings.targets.length}곳)`);
       render();
+      renderSmsSettingsBox();
     });
-    const shTestBtn = document.getElementById("shTestBtn");
-    if (shTestBtn) shTestBtn.addEventListener("click", async () => {
-      const sh = readSheetInputs();
-      if (!sh.url) { showToast("웹앱 URL을 먼저 입력해 주세요"); return; }
-      shTestBtn.disabled = true;
-      shTestBtn.textContent = "확인 중…";
+    box.querySelectorAll(".sh-test").forEach(b => b.addEventListener("click", async () => {
+      const draft = readSheetTargetsFromDom() || [];
+      const tg = draft[Number(b.dataset.idx)];
+      if (!tg || !tg.url) { showToast("웹앱 URL을 먼저 입력해 주세요"); return; }
+      b.disabled = true;
+      b.textContent = "확인 중…";
       try {
-        const r = await postToSheet({ action: "ping", center: fbCenter || "" }, sh);
-        showToast("✅ 연결 성공" + (r.sheet ? ` · 시트: ${r.sheet}` : ""));
+        const r = await postToSheet({ action: "ping", center: fbCenter || "" }, tg);
+        const centers = Array.isArray(r.centers) && r.centers.length ? r.centers.join(", ") : "전체";
+        showToast(`✅ ${tg.label || "시트"} 연결 성공` + (r.sheet ? ` · ${r.sheet}` : "") + ` · 허용 원: ${centers}`);
       } catch (e) {
-        showToast("❌ 연결 실패: " + (e.message || e));
+        showToast(`❌ ${tg.label || "시트"} 연결 실패: ` + (e.message || e));
       }
-      shTestBtn.disabled = false;
-      shTestBtn.textContent = "연결 테스트";
-    });
+      b.disabled = false;
+      b.textContent = "연결 테스트";
+    }));
   }
 
   let reservedSmsCache = [];
@@ -3118,7 +3198,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       if (data.tuitionSettings) state.tuitionSettings = { ...DEFAULT_TUITION_SETTINGS, ...data.tuitionSettings };
       if (data.calendar) state.calendar = data.calendar;
       if (data.smsSettings) state.smsSettings = data.smsSettings;
-      state.sheetSettings = { ...DEFAULT_SHEET_SETTINGS, ...(data.sheetSettings || {}) };
+      state.sheetSettings = normalizeSheetSettings(data.sheetSettings);
       // 학사달력(공휴일/방학)이 바뀌면 '경과' 등 계산이 달라지므로 명단을 다시 계산해줌
       if (state.rawRosterRows && state.rawRosterRows.length) {
         const { nextSaturday } = nextWeekRange(state.refDate);

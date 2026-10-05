@@ -7,6 +7,9 @@
  *
  * 스크립트 속성 (프로젝트 설정 > 스크립트 속성)
  *   TOKEN          : 결제 매니저 ⚙ 설정의 "비밀 토큰"과 같은 값. 비워 두면 토큰 검사를 하지 않음.
+ *   CENTERS        : (선택) 이 시트에 기록을 허용할 원 이름. 쉼표로 여러 개 (예: 서초반포원).
+ *                    비워 두면 모든 원을 받음 — 대표 계정 시트는 비워 두고, 원별 시트는 자기 원만 적어 두면
+ *                    설정 실수로 다른 원의 기록이 섞이는 것을 막을 수 있음.
  *   SPREADSHEET_ID : (선택) 시트에 붙어 있지 않은 독립 스크립트일 때만 기록할 시트 ID.
  */
 
@@ -31,13 +34,23 @@ function doPost(e) {
     return jsonOut({ ok: false, error: "JSON 파싱 실패" });
   }
 
-  var expected = (PropertiesService.getScriptProperties().getProperty("TOKEN") || "").trim();
+  var props = PropertiesService.getScriptProperties();
+  var expected = (props.getProperty("TOKEN") || "").trim();
   if (expected && String(body.token || "").trim() !== expected) {
     return jsonOut({ ok: false, error: "토큰이 일치하지 않아요" });
   }
 
+  // 허용 원 목록이 정해져 있으면 다른 원의 기록은 거절 (원별 시트에 다른 원 데이터가 섞이는 실수 방지)
+  var allowed = (props.getProperty("CENTERS") || "").split(",")
+    .map(function (c) { return c.trim(); })
+    .filter(function (c) { return c; });
+  var center = String(body.center || "").trim();
+  if (allowed.length && center && allowed.indexOf(center) === -1) {
+    return jsonOut({ ok: false, error: "이 시트는 " + allowed.join(", ") + " 전용이에요 (요청한 원: " + center + ")" });
+  }
+
   if (body.action === "ping") {
-    return jsonOut({ ok: true, sheet: getSpreadsheet().getName() });
+    return jsonOut({ ok: true, sheet: getSpreadsheet().getName(), centers: allowed });
   }
   if (body.action !== "sync") {
     return jsonOut({ ok: false, error: "알 수 없는 요청: " + body.action });
