@@ -1041,6 +1041,17 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     return rows;
   }
 
+  // 시트에서 지워야 할 기록키 — "지금 화면에 보이는데 결제가 안 된" 사람만.
+  // 토요일에 엑셀을 갈아 끼우면 지난 명단 학생은 화면에서 사라지는데, 그 학생들의 결제 행은 시트에 그대로 남아야 하므로
+  // 명단에 없는 학생은 삭제 대상에 넣지 않음. (기타·상자 결제자는 주차 문서에 있어 명단 교체와 무관)
+  function buildUnpaidKeys() {
+    const keys = [];
+    getAllStudentsList().forEach(s => { if (!state.checklist[s.id]?.paid) keys.push("정규:" + s.id); });
+    allExtraPayersFlat().forEach(r => { if (!r.paid || isNewStudentPayer(r)) keys.push("기타:" + r.id); });
+    allBoxPayersFlat().forEach(r => { if (!r.paid) keys.push("상자:" + r.id); });
+    return keys;
+  }
+
   function exportWeekRevenueCsv() {
     const rows = buildRevenueRows();
     let csv = "\uFEFF체크일,요일,이름,나이,교사,수업시간,금액,결제방법,메모,다음텀\n";
@@ -1105,7 +1116,12 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     renderSheetSyncStatus();
     const rows = buildRevenueRows();
     const targets = activeSheetTargets();
-    const payload = { action: "sync", center: fbCenter, week: weekKey(), rows, sentAt: new Date().toISOString() };
+    const payload = {
+      action: "sync", center: fbCenter, week: weekKey(), rows,
+      unpaidKeys: buildUnpaidKeys(),   // 화면에 있는데 결제 안 된 사람 → 시트에서 삭제
+      fullSyncKinds: ["기타", "상자"], // 기타·상자는 ✕로 지운 것도 반영되게 "없으면 삭제"
+      sentAt: new Date().toISOString(),
+    };
     try {
       // 시트마다 따로 보내고, 하나가 실패해도 나머지는 계속 진행
       const results = await Promise.all(targets.map(async t => {

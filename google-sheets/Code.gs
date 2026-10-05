@@ -81,8 +81,12 @@ function doPost(e) {
  * 한 원의 한 주(원 + 주차) 결제 완료 행을 통째로 받아 시트와 맞춤
  *  - 기록키가 이미 있으면 그 행을 갱신
  *  - 없으면 맨 아래에 추가
- *  - 같은 원·주차인데 이번에 안 온 기록키는 결제가 취소된 것이므로 삭제
+ *  - 삭제는 두 경우만:
+ *      (1) unpaidKeys 에 든 기록키 — 앱 화면에 보이는데 결제 체크가 안 된 사람
+ *      (2) fullSyncKinds 에 든 구분(기타·상자)인데 이번에 안 온 기록키 — ✕로 지운 결제자
+ *    → 토요일에 엑셀(명단)을 갈아 끼워 화면에서 사라진 학생의 결제 행은 그대로 남음
  *  - 다른 원이나 지난 주의 행은 건드리지 않음
+ *  - (예전 앱 호환) unpaidKeys / fullSyncKinds 둘 다 없으면 이번에 안 온 기록키를 모두 삭제
  */
 function syncWeek(body) {
   var sheet = getOrCreateSheet(LEDGER_SHEET, LEDGER_HEADERS);
@@ -98,9 +102,17 @@ function syncWeek(body) {
     if (!k) continue;
     existing[k] = i + 1;
     if (String(data[i][1]) === center && String(data[i][2]) === week) {
-      weekRows.push({ row: i + 1, key: k });
+      weekRows.push({ row: i + 1, key: k, kind: String(data[i][3] || "") });
     }
   }
+
+  var legacy = body.unpaidKeys === undefined && body.fullSyncKinds === undefined;
+  var unpaid = {};
+  (Array.isArray(body.unpaidKeys) ? body.unpaidKeys : []).forEach(function (k) {
+    if (k) unpaid[center + "|" + week + "|" + String(k)] = true;
+  });
+  var fullKinds = {};
+  (Array.isArray(body.fullSyncKinds) ? body.fullSyncKinds : []).forEach(function (k) { fullKinds[String(k)] = true; });
 
   var incoming = {};
   var appends = [];
@@ -120,7 +132,11 @@ function syncWeek(body) {
 
   // 결제가 취소된 행 삭제 — 행 번호가 밀리지 않게 아래에서 위로
   var toDelete = weekRows
-    .filter(function (w) { return !incoming[w.key]; })
+    .filter(function (w) {
+      if (incoming[w.key]) return false;
+      if (legacy) return true;
+      return !!(unpaid[w.key] || fullKinds[w.kind]);
+    })
     .map(function (w) { return w.row; })
     .sort(function (a, b) { return b - a; });
   toDelete.forEach(function (row) { sheet.deleteRow(row); });
