@@ -334,6 +334,26 @@
     align-items: center; justify-content: center; z-index: 999; padding: 20px;
   }
   #reservedSmsModal.open { display: flex; }
+  #ledgerModal {
+    position: fixed; inset: 0; background: rgba(27,42,34,0.55); display: none;
+    align-items: center; justify-content: center; z-index: 999; padding: 20px;
+  }
+  #ledgerModal.open { display: flex; }
+  .ledger-box { width: 1080px; }
+  .lg-filters { display: flex; flex-direction: column; gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); }
+  .lg-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .lg-row > .lg-label { font-size: 12px; font-weight: 700; color: var(--ink-soft); min-width: 52px; }
+  .lg-row .sms-input { padding: 7px 9px; background: var(--surface); }
+  .lg-row .rq-tab { padding: 6px 12px; font-size: 12px; }
+  .lg-sub { font-size: 12px; color: var(--ink-soft); }
+  .lg-summary { display: flex; gap: 18px; flex-wrap: wrap; align-items: baseline; font-size: 13px; }
+  .lg-summary b { font-family: var(--mono); }
+  .lg-summary .lg-total b { font-size: 18px; color: var(--accent); }
+  .lg-table { border: 1px solid var(--line); border-radius: 10px; max-height: 52vh; overflow: auto; }
+  .lg-table td.num, .lg-table th.num { text-align: right; font-family: var(--mono); }
+  .lg-table tr.lg-sum td { font-weight: 700; background: #FAFBF9; }
+  .lg-table td.memo { white-space: normal; min-width: 120px; color: var(--ink-soft); }
+  .lg-error { color: #C9401F; font-size: 12.5px; }
   .reserved-item {
     display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 8px;
     background: var(--bg); font-size: 13px;
@@ -436,6 +456,10 @@
 
   <div id="reservedSmsModal">
     <div class="capture-box calendar-box" id="reservedSmsBox"></div>
+  </div>
+
+  <div id="ledgerModal">
+    <div class="capture-box ledger-box" id="ledgerBox"></div>
   </div>
 
   <div id="toast"></div>
@@ -548,6 +572,9 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   function centerConfigRef() { return fbDb.collection("centers").doc(fbCenter).collection("data").doc("config"); }
   function centerWeekRef(wk) { return fbDb.collection("centers").doc(fbCenter).collection("weeks").doc(wk); }
   function userCenterRef(uid) { return fbDb.collection("userCenters").doc(uid); }
+  // 매출 장부: 결제 1건 = 문서 1개 (centers/{원}/ledger/{주차|기록키})
+  function centerLedgerRef(center) { return fbDb.collection("centers").doc(center || fbCenter).collection("ledger"); }
+  const CENTER_LIST = ["안양평촌원", "서초반포원", "강남대치원"];
 
   const DAY_FULL = { "월":"월요일", "화":"화요일", "수":"수요일", "목":"목요일", "금":"금요일", "토":"토요일", "일":"일요일", "기타":"기타", "전체":"전체" };
 
@@ -870,6 +897,8 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   state.tuitionSettings = loadTuitionSettings();
   state.sheetSettings = normalizeSheetSettings(null);
   state.sheetSync = { status: "idle", at: null, message: "", results: [] };
+  state.ledgerSync = { status: "idle", at: null, message: "" };
+  state.ledgerView = null;
   state.calendarOpen = false;
   state.newHolidayDate = "";
   state.newHolidayLabel = "";
@@ -1174,6 +1203,528 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     el.className = "sheet-sync-status " + ((state.sheetSync && state.sheetSync.status) || "");
   }
 
+  // 결제 데이터가 바뀌면 매출 장부(사이트 저장)와, 설정돼 있으면 구글 시트에도 반영
+  function schedulePaymentSync() {
+    scheduleLedgerSync();
+    scheduleSheetSync();
+  }
+
+  // ---- 매출 장부 (Firestore centers/{원}/ledger) ----
+  // 결제 1건 = 문서 1개. 결제한 순간의 이름·금액·결제방법을 그대로 저장해서
+  // 명단(엑셀)을 갈아 끼워도 지난 결제 기록이 남고, 월별·기간별로 모아 보거나 엑셀로 받을 수 있음.
+  const LEDGER_FIELDS = ["center", "week", "key", "kind", "category", "paidDate", "month", "day", "name", "age", "teacher", "time", "method", "amount", "memo", "nextTerm"];
+  const LEDGER_FULL_SYNC_KINDS = ["기타", "상자"]; // ✕로 지운 결제자도 반영되도록 "없으면 삭제"하는 구분
+  let unsubLedgerWeek = null;
+  let ledgerWeekCache = null;      // 지금 주차의 장부 문서 (docId -> data)
+  let ledgerWeekKey = null;
+  let ledgerWeekFromServer = false;
+  let weekLoadedKey = null;        // 주차 문서(체크 기록)를 받은 주차
+  let weekFromServerKey = null;    // 주차 문서를 서버에서 받은 주차
+  let ledgerSyncTimer = null;
+  let ledgerSyncInFlight = false;
+  let ledgerSyncAgain = false;
+  let ledgerSyncPending = false;
+
+  function ledgerDocId(week, key) { return `${week}|${key}`.replace(/\//g, "／"); }
+  function parseYmd(v) { const [y, m, d] = String(v || "").split("-").map(Number); return new Date(y || 1970, (m || 1) - 1, d || 1); }
+  function ledgerWeekLabel(week) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(week || "")) return week || "";
+    const sat = parseYmd(week);
+    return `${fmt(addDays(sat, -5))} ~ ${fmt(sat)}`;
+  }
+  function ledgerErrorText(e) {
+    if (e && e.code === "permission-denied") return "권한이 없어요 (Firebase 보안 규칙에 ledger 허용이 필요해요)";
+    return (e && (e.message || e.code)) || String(e);
+  }
+
+  function ledgerRowData(r, week) {
+    const paidDate = /^\d{4}-\d{2}-\d{2}$/.test(r.paidDate || "") ? r.paidDate : fmt(addDays(parseYmd(week), -5));
+    return {
+      center: fbCenter, week, key: r.key, kind: r.kind, category: r.category || "",
+      paidDate, month: paidDate.slice(0, 7), day: String(r.day || ""),
+      name: String(r.name || ""), age: String(r.age ?? "-"), teacher: String(r.teacher || "-"), time: String(r.time || "-"),
+      method: r.method || "카드", amount: Number(r.amount) || 0, memo: String(r.memo || ""), nextTerm: String(r.nextTerm || "-"),
+    };
+  }
+
+  function stopLedgerWeek() {
+    if (unsubLedgerWeek) { unsubLedgerWeek(); unsubLedgerWeek = null; }
+    ledgerWeekCache = null; ledgerWeekKey = null; ledgerWeekFromServer = false;
+  }
+
+  function subscribeLedgerWeek(wk) {
+    stopLedgerWeek();
+    if (!fbCenter) return;
+    const center = fbCenter;
+    // includeMetadataChanges: 캐시와 서버 내용이 같아도 "서버 확인 완료" 알림을 받기 위함
+    unsubLedgerWeek = centerLedgerRef(center).where("week", "==", wk).onSnapshot({ includeMetadataChanges: true }, snap => {
+      if (fbCenter !== center || weekKey() !== wk) return;
+      const m = new Map();
+      snap.forEach(d => m.set(d.id, d.data()));
+      ledgerWeekCache = m;
+      ledgerWeekKey = wk;
+      const firstServer = !ledgerWeekFromServer && !snap.metadata.fromCache;
+      if (!snap.metadata.fromCache) ledgerWeekFromServer = true;
+      if (state.ledgerSync.status === "idle") { state.ledgerSync = { status: "ok", at: null, message: "" }; renderLedgerSyncStatus(); }
+      if (ledgerSyncPending) { ledgerSyncPending = false; scheduleLedgerSync(); }
+      else if (firstServer) maybeAutoReconcileLedger();
+    }, err => {
+      state.ledgerSync = { status: "error", at: Date.now(), message: ledgerErrorText(err) };
+      renderLedgerSyncStatus();
+    });
+  }
+
+  function isRealCurrentWeek() {
+    return weekKey() === fmt(nextWeekRange(startOfDay(new Date())).nextSaturday);
+  }
+
+  // 다른 직원이 체크했거나, 창을 닫기 직전 저장이 못 된 경우를 대비해
+  // 이번 주 데이터를 서버에서 받으면 장부를 한 번 맞춰 둠 (바뀐 것만 씀)
+  function maybeAutoReconcileLedger() {
+    const wk = weekKey();
+    if (!fbCenter || !ledgerWeekFromServer || ledgerWeekKey !== wk || weekFromServerKey !== wk || !isRealCurrentWeek()) return;
+    if (ledgerSyncTimer || ledgerSyncInFlight) return; // 이미 저장이 예약돼 있으면 그대로 둠 (뒤로 미루지 않음)
+    scheduleLedgerSync(3000);
+  }
+
+  function scheduleLedgerSync(delay = 2000) {
+    if (!fbCenter) return;
+    clearTimeout(ledgerSyncTimer);
+    ledgerSyncTimer = setTimeout(() => { ledgerSyncTimer = null; syncLedger(); }, delay);
+  }
+
+  async function syncLedger() {
+    clearTimeout(ledgerSyncTimer);
+    ledgerSyncTimer = null;
+    const wk = weekKey();
+    // 체크 기록이나 장부를 아직 못 받았으면, 받는 즉시 다시 실행
+    if (!fbCenter || !ledgerWeekCache || ledgerWeekKey !== wk || weekLoadedKey !== wk) { ledgerSyncPending = true; return; }
+    if (ledgerSyncInFlight) { ledgerSyncAgain = true; return; }
+    const center = fbCenter;
+    const rows = buildRevenueRows();
+    const unpaid = new Set(buildUnpaidKeys());
+    const ops = [];
+    const incoming = new Set();
+    rows.forEach(r => {
+      const id = ledgerDocId(wk, r.key);
+      if (incoming.has(id)) return;
+      incoming.add(id);
+      const data = ledgerRowData(r, wk);
+      const prev = ledgerWeekCache.get(id);
+      if (!prev || LEDGER_FIELDS.some(f => prev[f] !== data[f])) ops.push({ id, data });
+    });
+    ledgerWeekCache.forEach((d, id) => {
+      if (incoming.has(id)) return;
+      // 삭제는 두 경우만: 화면에 보이는데 결제 안 된 사람, ✕로 지운 기타·상자 결제자
+      // → 토요일에 명단을 갈아 끼워 화면에서 사라진 학생의 결제 기록은 그대로 남음
+      if (unpaid.has(d.key) || LEDGER_FULL_SYNC_KINDS.includes(d.kind)) ops.push({ id, del: true });
+    });
+    if (!ops.length) {
+      if (state.ledgerSync.status !== "ok") {
+        state.ledgerSync = { status: "ok", at: state.ledgerSync.at, message: "" };
+        renderLedgerSyncStatus();
+      }
+      return;
+    }
+    ledgerSyncInFlight = true;
+    state.ledgerSync = { status: "sending", at: Date.now(), message: "" };
+    renderLedgerSyncStatus();
+    try {
+      const ref = centerLedgerRef(center);
+      const by = (fbAuth.currentUser && fbAuth.currentUser.email) || "";
+      for (let i = 0; i < ops.length; i += 400) {
+        const batch = fbDb.batch();
+        ops.slice(i, i + 400).forEach(op => {
+          if (op.del) batch.delete(ref.doc(op.id));
+          else batch.set(ref.doc(op.id), { ...op.data, updatedAt: Date.now(), updatedBy: by });
+        });
+        await batch.commit();
+      }
+      state.ledgerSync = { status: "ok", at: Date.now(), message: "" };
+    } catch (e) {
+      state.ledgerSync = { status: "error", at: Date.now(), message: ledgerErrorText(e) };
+    } finally {
+      ledgerSyncInFlight = false;
+      renderLedgerSyncStatus();
+      if (ledgerSyncAgain) { ledgerSyncAgain = false; scheduleLedgerSync(500); }
+    }
+  }
+
+  // 창을 닫거나 다른 탭으로 갈 때 기다리던 저장을 바로 실행 (오프라인 저장은 Firestore가 다음 접속 때 보냄)
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden" && ledgerSyncTimer) syncLedger();
+  });
+
+  function ledgerSyncStatusText() {
+    const ls = state.ledgerSync || {};
+    const when = ls.at ? new Date(ls.at).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" }) : "";
+    if (!fbCenter) return "";
+    if (ls.status === "sending") return "📒 매출 장부에 저장하는 중…";
+    if (ls.status === "error") return `📒 매출 장부 저장 실패 · ${when} · ${ls.message}`;
+    if (ls.status === "ok") return `📒 매출 장부에 저장돼요${when ? ` · 마지막 저장 ${when}` : ""}${ls.message ? ` · ${ls.message}` : ""}`;
+    return "📒 매출 장부 불러오는 중…";
+  }
+
+  function renderLedgerSyncStatus() {
+    const el = document.getElementById("ledgerSyncStatus");
+    if (!el) return;
+    el.textContent = ledgerSyncStatusText();
+    el.className = "sheet-sync-status " + ((state.ledgerSync && state.ledgerSync.status) || "");
+  }
+
+  // ---- 매출 장부 보기 (필터 · 묶어 보기 · 엑셀 저장) ----
+  const LEDGER_KIND_OPTIONS = ["정규", "샘플 후 등록", "다른 요일", "기타", "상자"];
+  const LEDGER_GROUPS = [["list", "건별"], ["day", "일별"], ["week", "주별"], ["month", "월별"], ["kind", "구분별"], ["center", "원별"]];
+  const LEDGER_GROUP_HEAD = { day: "날짜", week: "주차", month: "월", kind: "구분", center: "원" };
+
+  function ledgerKindLabel(r) { return r.kind === "기타" ? (r.category || "기타") : (r.kind || ""); }
+  function monthBounds(ym) {
+    const [y, m] = ym.split("-").map(Number);
+    return { from: fmt(new Date(y, m - 1, 1)), to: fmt(new Date(y, m, 0)) };
+  }
+  function ledgerPresetRange(preset) {
+    const today = startOfDay(new Date());
+    const ym = fmt(today).slice(0, 7);
+    if (preset === "week") {
+      const { nextMonday } = nextWeekRange(today);
+      return { from: fmt(nextMonday), to: fmt(addDays(nextMonday, 6)) };
+    }
+    if (preset === "month") return monthBounds(ym);
+    if (preset === "lastMonth") return monthBounds(fmt(new Date(today.getFullYear(), today.getMonth() - 1, 1)).slice(0, 7));
+    if (preset === "3months") return { from: fmt(new Date(today.getFullYear(), today.getMonth() - 2, 1)), to: monthBounds(ym).to };
+    if (preset === "year") return { from: `${today.getFullYear()}-01-01`, to: `${today.getFullYear()}-12-31` };
+    return { from: "2000-01-01", to: "2099-12-31" };
+  }
+  function rangeMonth(from, to) {
+    const ym = String(from || "").slice(0, 7);
+    if (!ym) return "";
+    const b = monthBounds(ym);
+    return b.from === from && b.to === to ? ym : "";
+  }
+
+  function defaultLedgerView() {
+    return {
+      owner: fbCenter, centers: fbCenter, ...ledgerPresetRange("month"),
+      method: "", kind: "", q: "", group: "list", split: true,
+      rows: null, loading: false, errors: [], loadedKey: "",
+    };
+  }
+
+  function ledgerCentersFor(v) {
+    if (!state.isAdmin) return fbCenter ? [fbCenter] : [];
+    if (v === "all") return CENTER_LIST.slice();
+    return v ? [v] : (fbCenter ? [fbCenter] : []);
+  }
+
+  async function loadLedgerView(force) {
+    const lv = state.ledgerView;
+    if (!lv) return;
+    const centers = ledgerCentersFor(lv.centers);
+    const key = `${centers.join(",")}|${lv.from}|${lv.to}`;
+    if (!force && lv.loadedKey === key && lv.rows) { renderLedgerResults(); return; }
+    const token = (loadLedgerView._t = (loadLedgerView._t || 0) + 1);
+    lv.loading = true;
+    lv.errors = [];
+    renderLedgerResults();
+    const results = await Promise.all(centers.map(c =>
+      centerLedgerRef(c).where("paidDate", ">=", lv.from).where("paidDate", "<=", lv.to).get()
+        .then(snap => ({ c, docs: snap.docs.map(d => { const x = d.data(); return { ...x, id: d.id, center: x.center || c }; }) }))
+        .catch(e => ({ c, error: ledgerErrorText(e) }))
+    ));
+    if (token !== loadLedgerView._t || state.ledgerView !== lv) return; // 그 사이 조건이 바뀌었으면 무시
+    lv.rows = [].concat(...results.map(r => r.docs || []));
+    lv.errors = results.filter(r => r.error).map(r => `${r.c}: ${r.error}`);
+    lv.loading = false;
+    lv.loadedKey = key;
+    renderLedgerResults();
+  }
+
+  function filteredLedgerRows() {
+    const lv = state.ledgerView;
+    const q = (lv.q || "").trim().toLowerCase();
+    return (lv.rows || []).filter(r =>
+      (!lv.method || (r.method || "카드") === lv.method) &&
+      (!lv.kind || ledgerKindLabel(r) === lv.kind) &&
+      (!q || [r.name, r.memo, r.teacher].some(v => String(v || "").toLowerCase().includes(q)))
+    );
+  }
+
+  function sortLedgerRows(rows, desc) {
+    const dir = desc ? -1 : 1;
+    return rows.slice().sort((a, b) =>
+      dir * String(a.paidDate || "").localeCompare(String(b.paidDate || "")) ||
+      CENTER_LIST.indexOf(a.center) - CENTER_LIST.indexOf(b.center) ||
+      String(a.name || "").localeCompare(String(b.name || ""), "ko"));
+  }
+
+  function sumLedger(rows) {
+    const by = { "카드": 0, "이체": 0, "제로페이": 0, "현금": 0 };
+    let total = 0;
+    rows.forEach(r => { const a = Number(r.amount) || 0; total += a; const m = r.method || "카드"; by[m] = (by[m] || 0) + a; });
+    return { count: rows.length, total, by };
+  }
+
+  function ledgerGroupKey(group, r) {
+    if (group === "day") return r.paidDate || "";
+    if (group === "week") return ledgerWeekLabel(r.week);
+    if (group === "month") return r.month || String(r.paidDate || "").slice(0, 7);
+    if (group === "kind") return ledgerKindLabel(r);
+    if (group === "center") return r.center || "";
+    return "";
+  }
+  function ledgerGroupDisplay(group, label) {
+    if (group === "month" && /^\d{4}-\d{2}$/.test(label)) return `${label.slice(0, 4)}년 ${Number(label.slice(5))}월`;
+    return label;
+  }
+
+  function groupLedgerRows(rows, group, split, desc) {
+    const map = new Map();
+    rows.forEach(r => {
+      const label = ledgerGroupKey(group, r);
+      const center = split && group !== "center" ? (r.center || "") : "";
+      const k = label + "|" + center;
+      if (!map.has(k)) map.set(k, { label, center, rows: [] });
+      map.get(k).rows.push(r);
+    });
+    const order = (g) => {
+      if (group === "kind") return LEDGER_KIND_OPTIONS.indexOf(g.label);
+      if (group === "center") return CENTER_LIST.indexOf(g.label);
+      return 0;
+    };
+    const dir = desc ? -1 : 1;
+    return Array.from(map.values()).map(g => ({ ...g, ...sumLedger(g.rows) })).sort((a, b) =>
+      (group === "kind" || group === "center" ? order(a) - order(b) : dir * a.label.localeCompare(b.label)) ||
+      CENTER_LIST.indexOf(a.center) - CENTER_LIST.indexOf(b.center));
+  }
+
+  function openLedgerModal() {
+    if (!fbCenter) return;
+    if (!state.ledgerView || state.ledgerView.owner !== fbCenter) state.ledgerView = defaultLedgerView();
+    document.getElementById("ledgerModal").classList.add("open");
+    renderLedgerBox();
+    loadLedgerView(true);
+  }
+
+  function renderLedgerBox() {
+    const box = document.getElementById("ledgerBox");
+    const lv = state.ledgerView;
+    if (!box || !lv) return;
+    const centers = ledgerCentersFor(lv.centers);
+    const presets = [["week", "이번 주"], ["month", "이번 달"], ["lastMonth", "지난 달"], ["3months", "최근 3개월"], ["year", "올해"], ["all", "전체 기간"]];
+    const activePreset = (presets.find(([k]) => { const r = ledgerPresetRange(k); return r.from === lv.from && r.to === lv.to; }) || [""])[0];
+    box.innerHTML = `
+      <div class="capture-actions" style="justify-content: space-between; align-items: center;">
+        <div class="sms-title">📒 매출 장부</div>
+        <div style="display:flex; gap:8px;">
+          <button class="btn primary" id="lgExportBtn">⤓ 엑셀로 저장</button>
+          <button class="btn ghost" id="lgCloseBtn">닫기</button>
+        </div>
+      </div>
+      <div class="lg-filters">
+        <div class="lg-row">
+          <span class="lg-label">원</span>
+          ${state.isAdmin ? `
+            <select id="lgCenter" class="sms-input">
+              <option value="all" ${lv.centers === "all" ? "selected" : ""}>세 원 전체</option>
+              ${CENTER_LIST.map(c => `<option value="${escapeHtml(c)}" ${lv.centers === c ? "selected" : ""}>${escapeHtml(c)}</option>`).join("")}
+            </select>
+            ${centers.length > 1 ? `<label class="tuition-row" style="font-weight:600;"><input type="checkbox" id="lgSplit" ${lv.split ? "checked" : ""} /> 묶어 볼 때 원별로 나누기</label>` : ``}
+          ` : `<b>${escapeHtml(fbCenter || "")}</b>`}
+        </div>
+        <div class="lg-row">
+          <span class="lg-label">기간</span>
+          ${presets.map(([k, label]) => `<button class="rq-tab ${activePreset === k ? "active" : ""}" data-lgpreset="${k}">${label}</button>`).join("")}
+        </div>
+        <div class="lg-row">
+          <span class="lg-label"></span>
+          <span class="lg-sub">월</span> <input type="month" id="lgMonth" class="sms-input" value="${escapeHtml(rangeMonth(lv.from, lv.to))}" />
+          <span class="lg-sub">또는</span>
+          <input type="date" id="lgFrom" class="sms-input" value="${escapeHtml(lv.from)}" /> ~
+          <input type="date" id="lgTo" class="sms-input" value="${escapeHtml(lv.to)}" />
+        </div>
+        <div class="lg-row">
+          <span class="lg-label">조건</span>
+          <select id="lgMethod" class="sms-input">
+            <option value="">결제방법 전체</option>
+            ${PAY_METHODS.map(m => `<option value="${m}" ${lv.method === m ? "selected" : ""}>${m}</option>`).join("")}
+          </select>
+          <select id="lgKind" class="sms-input">
+            <option value="">구분 전체</option>
+            ${LEDGER_KIND_OPTIONS.map(k => `<option value="${k}" ${lv.kind === k ? "selected" : ""}>${k}</option>`).join("")}
+          </select>
+          <input id="lgSearch" class="sms-input" placeholder="이름·메모·교사 검색" value="${escapeHtml(lv.q)}" style="flex:1; min-width:160px;" />
+        </div>
+        <div class="lg-row">
+          <span class="lg-label">묶어 보기</span>
+          ${LEDGER_GROUPS.filter(([k]) => k !== "center" || centers.length > 1).map(([k, label]) => `<button class="rq-tab ${lv.group === k ? "active" : ""}" data-lggroup="${k}">${label}</button>`).join("")}
+        </div>
+      </div>
+      <div id="lgResults"></div>
+      <div class="sms-hint">결제를 체크하면 그 순간의 이름·금액·결제방법이 장부에 저장돼요. 명단(엑셀)을 바꿔도 지난 기록은 남아요. 이번 주 기록은 화면의 체크 상태와 같게 맞춰지고, 지난 주 기록은 그대로 보관돼요. 신규생 분류 결제는 장부에 기록되지 않아요. 엑셀에는 지금 조건의 건별 기록과 일별·주별·월별·구분별 합계가 함께 들어가요.</div>
+    `;
+
+    document.getElementById("lgCloseBtn").addEventListener("click", () => {
+      document.getElementById("ledgerModal").classList.remove("open");
+    });
+    document.getElementById("lgExportBtn").addEventListener("click", exportLedgerXlsx);
+    const setRange = (from, to) => {
+      if (!from || !to) return;
+      if (from > to) [from, to] = [to, from];
+      lv.from = from; lv.to = to;
+      renderLedgerBox();
+      loadLedgerView();
+    };
+    const centerSel = document.getElementById("lgCenter");
+    if (centerSel) centerSel.addEventListener("change", () => {
+      lv.centers = centerSel.value;
+      if (lv.group === "center" && ledgerCentersFor(lv.centers).length < 2) lv.group = "list";
+      renderLedgerBox();
+      loadLedgerView();
+    });
+    const split = document.getElementById("lgSplit");
+    if (split) split.addEventListener("change", () => { lv.split = split.checked; renderLedgerResults(); });
+    box.querySelectorAll("[data-lgpreset]").forEach(b => b.addEventListener("click", () => {
+      const r = ledgerPresetRange(b.dataset.lgpreset);
+      setRange(r.from, r.to);
+    }));
+    const monthInput = document.getElementById("lgMonth");
+    monthInput.addEventListener("change", () => {
+      if (!monthInput.value) return;
+      const r = monthBounds(monthInput.value);
+      setRange(r.from, r.to);
+    });
+    const fromInput = document.getElementById("lgFrom");
+    const toInput = document.getElementById("lgTo");
+    fromInput.addEventListener("change", () => setRange(fromInput.value, toInput.value));
+    toInput.addEventListener("change", () => setRange(fromInput.value, toInput.value));
+    const methodSel = document.getElementById("lgMethod");
+    methodSel.addEventListener("change", () => { lv.method = methodSel.value; renderLedgerResults(); });
+    const kindSel = document.getElementById("lgKind");
+    kindSel.addEventListener("change", () => { lv.kind = kindSel.value; renderLedgerResults(); });
+    const search = document.getElementById("lgSearch");
+    search.addEventListener("input", () => { lv.q = search.value; renderLedgerResults(); });
+    box.querySelectorAll("[data-lggroup]").forEach(b => b.addEventListener("click", () => {
+      lv.group = b.dataset.lggroup;
+      box.querySelectorAll("[data-lggroup]").forEach(x => x.classList.toggle("active", x === b));
+      renderLedgerResults();
+    }));
+    renderLedgerResults();
+  }
+
+  function renderLedgerResults() {
+    const el = document.getElementById("lgResults");
+    const lv = state.ledgerView;
+    if (!el || !lv) return;
+    const won = (n) => `${(Number(n) || 0).toLocaleString()}원`;
+    const errors = (lv.errors || []).map(e => `<div class="lg-error">⚠ ${escapeHtml(e)}</div>`).join("");
+    if (lv.loading || !lv.rows) { el.innerHTML = `${errors}<div class="sms-hint">불러오는 중…</div>`; return; }
+    const rows = filteredLedgerRows();
+    const sum = sumLedger(rows);
+    const multi = ledgerCentersFor(lv.centers).length > 1;
+    const split = multi && lv.split;
+    let html = `
+      ${errors}
+      <div class="lg-summary">
+        <span class="lg-total">합계 <b>${won(sum.total)}</b></span>
+        <span>건수 <b>${sum.count.toLocaleString()}</b>건</span>
+        ${PAY_METHODS.map(m => `<span>${m} <b>${won(sum.by[m])}</b></span>`).join("")}
+      </div>
+    `;
+    if (!rows.length) {
+      html += `<div class="sms-hint" style="padding:16px 0;">조건에 맞는 결제 기록이 없어요.</div>`;
+      el.innerHTML = html;
+      return;
+    }
+    if (lv.group === "list") {
+      const LIMIT = 1000;
+      const shown = sortLedgerRows(rows, true).slice(0, LIMIT);
+      html += `<div class="lg-table"><table>
+        <thead><tr><th>체크일</th>${multi ? `<th>원</th>` : ``}<th>요일</th><th>구분</th><th>이름</th><th>나이</th><th>교사</th><th class="num">금액</th><th>결제방법</th><th>메모</th></tr></thead>
+        <tbody>${shown.map(r => `<tr>
+          <td class="mono">${escapeHtml(r.paidDate)}</td>${multi ? `<td>${escapeHtml(r.center)}</td>` : ``}
+          <td>${escapeHtml(r.day)}</td><td>${escapeHtml(ledgerKindLabel(r))}</td><td><b>${escapeHtml(r.name)}</b></td>
+          <td>${escapeHtml(r.age)}</td><td>${escapeHtml(r.teacher)}</td><td class="num">${won(r.amount)}</td>
+          <td>${escapeHtml(r.method)}</td><td class="memo">${escapeHtml(r.memo)}</td>
+        </tr>`).join("")}</tbody></table></div>`;
+      if (rows.length > LIMIT) html += `<div class="sms-hint">화면에는 최근 ${LIMIT.toLocaleString()}건만 보여요. 엑셀로 저장하면 ${rows.length.toLocaleString()}건 전체가 들어가요.</div>`;
+    } else {
+      const showCenter = split && lv.group !== "center";
+      const groups = groupLedgerRows(rows, lv.group, showCenter, true);
+      html += `<div class="lg-table"><table>
+        <thead><tr><th>${LEDGER_GROUP_HEAD[lv.group]}</th>${showCenter ? `<th>원</th>` : ``}<th class="num">건수</th><th class="num">합계</th>${PAY_METHODS.map(m => `<th class="num">${m}</th>`).join("")}</tr></thead>
+        <tbody>${groups.map(g => `<tr>
+          <td><b>${escapeHtml(ledgerGroupDisplay(lv.group, g.label))}</b></td>${showCenter ? `<td>${escapeHtml(g.center)}</td>` : ``}
+          <td class="num">${g.count.toLocaleString()}</td><td class="num"><b>${won(g.total)}</b></td>
+          ${PAY_METHODS.map(m => `<td class="num">${won(g.by[m])}</td>`).join("")}
+        </tr>`).join("")}
+        <tr class="lg-sum"><td>합계</td>${showCenter ? `<td></td>` : ``}<td class="num">${sum.count.toLocaleString()}</td><td class="num">${won(sum.total)}</td>${PAY_METHODS.map(m => `<td class="num">${won(sum.by[m])}</td>`).join("")}</tr>
+        </tbody></table></div>`;
+    }
+    el.innerHTML = html;
+  }
+
+  function exportLedgerXlsx() {
+    const lv = state.ledgerView;
+    if (!lv || lv.loading || !lv.rows) { showToast("장부를 불러온 뒤에 저장해 주세요"); return; }
+    const rows = sortLedgerRows(filteredLedgerRows(), false);
+    if (!rows.length) { showToast("저장할 결제 기록이 없어요"); return; }
+    const centers = ledgerCentersFor(lv.centers);
+    const multi = centers.length > 1;
+    const split = multi && lv.split;
+    const wb = XLSX.utils.book_new();
+    const addSheet = (name, aoa, widths) => {
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      ws["!cols"] = widths.map(w => ({ wch: w }));
+      XLSX.utils.book_append_sheet(wb, ws, name);
+    };
+
+    addSheet("매출기록",
+      [["체크일", "원", "주차", "요일", "구분", "이름", "나이", "교사", "수업시간", "금액", "결제방법", "메모", "다음텀"]].concat(
+        rows.map(r => [r.paidDate, r.center, ledgerWeekLabel(r.week), r.day, ledgerKindLabel(r), r.name, r.age, r.teacher, r.time, Number(r.amount) || 0, r.method, r.memo, r.nextTerm]))
+        .concat([["합계", "", "", "", "", `${rows.length}건`, "", "", "", sumLedger(rows).total, "", "", ""]]),
+      [11, 11, 24, 7, 12, 10, 6, 10, 10, 11, 9, 30, 13]);
+
+    const groupSheet = (group, title) => {
+      const showCenter = split && group !== "center";
+      const groups = groupLedgerRows(rows, group, showCenter, false);
+      const total = sumLedger(rows);
+      const head = [LEDGER_GROUP_HEAD[group]].concat(showCenter ? ["원"] : [], ["건수", "합계"], PAY_METHODS);
+      const body = groups.map(g => [ledgerGroupDisplay(group, g.label)].concat(showCenter ? [g.center] : [], [g.count, g.total], PAY_METHODS.map(m => g.by[m] || 0)));
+      const foot = [["합계"].concat(showCenter ? [""] : [], [total.count, total.total], PAY_METHODS.map(m => total.by[m] || 0))];
+      addSheet(title, [head].concat(body, foot), [group === "week" ? 24 : 13].concat(showCenter ? [11] : [], [7, 12, 11, 11, 11, 11]));
+    };
+    groupSheet("month", "월별합계");
+    groupSheet("week", "주별합계");
+    groupSheet("day", "일별합계");
+    groupSheet("kind", "구분별합계");
+    if (multi) groupSheet("center", "원별합계");
+
+    const now = new Date();
+    addSheet("조건", [
+      ["항목", "값"],
+      ["원", centers.join(", ")],
+      ["기간", `${lv.from} ~ ${lv.to}`],
+      ["결제방법", lv.method || "전체"],
+      ["구분", lv.kind || "전체"],
+      ["검색", lv.q || "-"],
+      ["건수", rows.length],
+      ["합계", sumLedger(rows).total],
+      ["저장 시각", `${fmt(now)} ${now.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })}`],
+      ["참고", "신규생 분류 결제는 장부에 기록되지 않아요."],
+    ], [10, 40]);
+
+    const who = multi ? "전체" : centers[0];
+    const period = lv.from === "2000-01-01" && lv.to === "2099-12-31" ? "전체기간" : `${lv.from}_${lv.to}`;
+    const out = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+    const blob = new Blob([out], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `매출장부_${who}_${period}.xlsx`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    showToast(`⤓ 엑셀로 저장했어요 (${rows.length}건)`);
+  }
+
   // 실시간 이번 주(현재 로드된 명단 기준) 결제완료 합계 — 별도 저장 안 하고 현재 체크 상태 그대로 집계
   function weekRevenueLive() {
     const byMethod = { "카드": 0, "이체": 0, "제로페이": 0, "현금": 0 };
@@ -1247,6 +1798,8 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     state.extraPayers = {};
     state.sheetSettings = normalizeSheetSettings(null);
     state.sheetSync = { status: "idle", at: null, message: "", results: [] };
+    state.ledgerSync = { status: "idle", at: null, message: "" };
+    state.ledgerView = null;
     clearTimeout(sheetSyncTimer);
   }
 
@@ -1257,7 +1810,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       state.messageType = "error";
       render();
     });
-    scheduleSheetSync();
+    schedulePaymentSync();
   }
 
   function saveBoxPayers() {
@@ -1267,7 +1820,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       state.messageType = "error";
       render();
     });
-    scheduleSheetSync();
+    schedulePaymentSync();
   }
 
   function saveChecklist() {
@@ -1277,7 +1830,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       state.messageType = "error";
       render();
     });
-    scheduleSheetSync();
+    schedulePaymentSync();
   }
 
   function toRawEntries(wb) {
@@ -1382,7 +1935,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   }
 
   function clearChecklist() {
-    if (!window.confirm("정말로 이번 주 체크 기록(결제/LMS/엑셀 체크, 메모, 결제방법)과 오늘의 신규생·기타 결제자·연구원 상자 결제자 등록 내용을 전부 지울까요? 지운 뒤에도 잠깐은 '되돌리기'로 복구할 수 있어요.")) {
+    if (!window.confirm("정말로 이번 주 체크 기록(결제/LMS/엑셀 체크, 메모, 결제방법)과 오늘의 신규생·기타 결제자·연구원 상자 결제자 등록 내용을 전부 지울까요? 매출 장부의 이번 주 기록도 같이 지워져요. 지운 뒤에도 잠깐은 '되돌리기'로 복구할 수 있어요.")) {
       return;
     }
     const snapshot = {
@@ -1398,7 +1951,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       centerWeekRef(weekKey()).set({ checklist: {}, extraPayers: {}, boxPayers: {} }).catch(() => {});
     }
     render();
-    scheduleSheetSync();
+    schedulePaymentSync();
     showUndoToast("🗑 체크 기록과 신규생·기타·상자 결제자를 초기화했어요", () => {
       state.checklist = snapshot.checklist;
       state.extraPayers = snapshot.extraPayers;
@@ -1409,7 +1962,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         }).catch(() => {});
       }
       render();
-      scheduleSheetSync();
+      schedulePaymentSync();
       showToast("↩️ 초기화를 되돌렸어요");
     });
   }
@@ -1870,7 +2423,8 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         <div class="revenue-card-head">
           <div class="revenue-title">💰 매출 요약</div>
           <div class="revenue-card-actions">
-            <button class="btn ghost" id="sheetSyncBtn">📊 구글 시트에 기록</button>
+            <button class="btn ghost" id="ledgerOpenBtn2">📒 매출 장부</button>
+            ${sheetSyncReady() ? `<button class="btn ghost" id="sheetSyncBtn">📊 구글 시트에 기록</button>` : ``}
             <button class="btn ghost" id="exportRevenueBtn">⤓ 매출 기록 내보내기</button>
           </div>
         </div>
@@ -1882,9 +2436,10 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
           <div class="revenue-total">이번 주 <span class="mono">(${fmtShort(nextMonday)}~${fmtShort(nextSaturday)})</span> <b>${weekTotal.toLocaleString()}원</b></div>
           <div class="revenue-breakdown">${methodRow(weekByMethod)}</div>
         </div>
-        <div class="sms-hint" style="color:rgba(255,255,255,.55);">현재 불러온 명단의 결제 체크 상태를 실시간으로 더한 값이에요. 별도로 저장되지 않아요.</div>
+        <div class="sms-hint" style="color:rgba(255,255,255,.55);">현재 불러온 명단의 결제 체크 상태를 실시간으로 더한 값이에요. 결제 기록은 매출 장부에 따로 쌓여서 월별·기간별로 볼 수 있어요.</div>
         <div class="sms-hint" style="color:rgba(255,255,255,.55);">신규생 결제는 합산되지 않습니다.</div>
-        <div id="sheetSyncStatus" class="sheet-sync-status ${escapeHtml((state.sheetSync && state.sheetSync.status) || "")}">${escapeHtml(sheetSyncStatusText())}</div>
+        <div id="ledgerSyncStatus" class="sheet-sync-status ${escapeHtml((state.ledgerSync && state.ledgerSync.status) || "")}">${escapeHtml(ledgerSyncStatusText())}</div>
+        ${sheetSyncReady() ? `<div id="sheetSyncStatus" class="sheet-sync-status ${escapeHtml((state.sheetSync && state.sheetSync.status) || "")}">${escapeHtml(sheetSyncStatusText())}</div>` : ``}
       </div>
     `;
   }
@@ -1921,6 +2476,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         <div class="toolbar">
           <input type="date" class="refdate" id="refDateInput" value="${fmt(state.refDate)}" title="기준일 (보통 오늘)" />
           <button class="btn" id="calendarOpenBtn">📅 학사달력</button>
+          <button class="btn" id="ledgerOpenBtn">📒 매출 장부</button>
           <button class="btn primary" id="uploadBtn">⬆ 명단 업로드</button>
           ${state.students ? `<button class="btn" id="exportBtn">⤓ 백업 저장</button>` : ``}
           <button class="btn" id="importBtn">⤒ 백업 불러오기</button>
@@ -2068,6 +2624,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     if (adminCenterSwitch) adminCenterSwitch.addEventListener("change", () => {
       const newCenter = adminCenterSwitch.value;
       if (newCenter === fbCenter) return;
+      if (ledgerSyncTimer) syncLedger(); // 기다리던 장부 저장은 바꾸기 전 원으로 먼저 보냄
       fbCenter = newCenter;
       loadWeekFromStorage();
       state.message = "";
@@ -2178,6 +2735,10 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
 
     const exportRevenueBtn = document.getElementById("exportRevenueBtn");
     if (exportRevenueBtn) exportRevenueBtn.addEventListener("click", exportWeekRevenueCsv);
+    ["ledgerOpenBtn", "ledgerOpenBtn2"].forEach(id => {
+      const b = document.getElementById(id);
+      if (b) b.addEventListener("click", openLedgerModal);
+    });
     const sheetSyncBtn = document.getElementById("sheetSyncBtn");
     if (sheetSyncBtn) sheetSyncBtn.addEventListener("click", () => syncRevenueToSheet({ manual: true }));
 
@@ -3187,6 +3748,12 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     if (unsubRoster) { unsubRoster(); unsubRoster = null; }
     if (unsubWeek) { unsubWeek(); unsubWeek = null; }
     if (unsubConfig) { unsubConfig(); unsubConfig = null; }
+    stopLedgerWeek();
+    clearTimeout(ledgerSyncTimer);
+    ledgerSyncTimer = null;
+    ledgerSyncPending = false;
+    weekLoadedKey = null;
+    weekFromServerKey = null;
   }
 
   function startFirestoreSync() {
@@ -3207,6 +3774,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       const days = DAY_ORDER.filter(d => state.students && state.students[d]);
       state.activeDay = state.students ? (days[0] || "전체") : null;
       render();
+      if (!doc.metadata.fromCache && !doc.metadata.hasPendingWrites) maybeAutoReconcileLedger();
     }, () => {});
 
     unsubConfig = centerConfigRef().onSnapshot(doc => {
@@ -3231,6 +3799,15 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   function subscribeWeek() {
     if (unsubWeek) { unsubWeek(); unsubWeek = null; }
     const wk = weekKey();
+    weekLoadedKey = null;
+    weekFromServerKey = null;
+    subscribeLedgerWeek(wk);
+    // 이미 접속했던 브라우저는 캐시와 서버가 같으면 서버 스냅샷이 따로 오지 않으므로, 서버에서 한 번 직접 확인
+    centerWeekRef(wk).get({ source: "server" }).then(() => {
+      if (weekKey() !== wk || !unsubWeek) return;
+      weekFromServerKey = wk;
+      maybeAutoReconcileLedger();
+    }).catch(() => {});
     unsubWeek = centerWeekRef(wk).onSnapshot(doc => {
       if (weekKey() !== wk) return; // 그 사이 날짜가 바뀌었으면 무시
       const data = doc.exists ? doc.data() : {};
@@ -3255,6 +3832,12 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         state.extraPayers = {};
       }
       render();
+      weekLoadedKey = wk;
+      if (ledgerSyncPending) { ledgerSyncPending = false; scheduleLedgerSync(); }
+      if (!doc.metadata.fromCache && !doc.metadata.hasPendingWrites) {
+        weekFromServerKey = wk;
+        maybeAutoReconcileLedger();
+      }
     }, () => {});
   }
 
