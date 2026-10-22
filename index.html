@@ -1013,7 +1013,8 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
 
   // 매출 기록 행 생성 — CSV 내보내기와 구글 시트 전송이 같은 행을 사용
   // key: 원·주차 안에서 결제 1건을 가리키는 고유키 (시트에서 중복 없이 갱신하는 기준)
-  function buildRevenueRows() {
+  // includeNewStudents: 매출 장부만 true — 매출 요약 합계·CSV 내보내기·구글 시트는 신규생 제외
+  function buildRevenueRows(opts = {}) {
     const rows = getAllStudentsList()
       .filter(s => state.checklist[s.id]?.paid)
       .map(s => {
@@ -1034,9 +1035,9 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
           nextTerm: nt ? `${fmtShort(nt.termStart)}~${fmtShort(nt.termEnd)}` : "-",
         };
       });
-    allExtraPayersFlat().filter(r => r.paid && !isNewStudentPayer(r)).forEach(r => {
+    allExtraPayersFlat().filter(r => r.paid && (opts.includeNewStudents || !isNewStudentPayer(r))).forEach(r => {
       const day = DAY_FULL[r._day] || r._day;
-      const category = r.category || "신규";
+      const category = r.category || "신규생";
       rows.push({
         key: "기타:" + r.id, kind: "기타", category,
         day, dayLabel: `${category}(${day})`,
@@ -1073,10 +1074,10 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   // 시트에서 지워야 할 기록키 — "지금 화면에 보이는데 결제가 안 된" 사람만.
   // 토요일에 엑셀을 갈아 끼우면 지난 명단 학생은 화면에서 사라지는데, 그 학생들의 결제 행은 시트에 그대로 남아야 하므로
   // 명단에 없는 학생은 삭제 대상에 넣지 않음. (기타·상자 결제자는 주차 문서에 있어 명단 교체와 무관)
-  function buildUnpaidKeys() {
+  function buildUnpaidKeys(opts = {}) {
     const keys = [];
     getAllStudentsList().forEach(s => { if (!state.checklist[s.id]?.paid) keys.push("정규:" + s.id); });
-    allExtraPayersFlat().forEach(r => { if (!r.paid || isNewStudentPayer(r)) keys.push("기타:" + r.id); });
+    allExtraPayersFlat().forEach(r => { if (!r.paid || (!opts.includeNewStudents && isNewStudentPayer(r))) keys.push("기타:" + r.id); });
     allBoxPayersFlat().forEach(r => { if (!r.paid) keys.push("상자:" + r.id); });
     return keys;
   }
@@ -1301,8 +1302,8 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     if (!fbCenter || !ledgerWeekCache || ledgerWeekKey !== wk || weekLoadedKey !== wk) { ledgerSyncPending = true; return; }
     if (ledgerSyncInFlight) { ledgerSyncAgain = true; return; }
     const center = fbCenter;
-    const rows = buildRevenueRows();
-    const unpaid = new Set(buildUnpaidKeys());
+    const rows = buildRevenueRows({ includeNewStudents: true });
+    const unpaid = new Set(buildUnpaidKeys({ includeNewStudents: true }));
     const ops = [];
     const incoming = new Set();
     rows.forEach(r => {
@@ -1373,7 +1374,12 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   }
 
   // ---- 매출 장부 보기 (필터 · 묶어 보기 · 엑셀 저장) ----
-  const LEDGER_KIND_OPTIONS = ["정규", "샘플 후 등록", "다른 요일", "기타", "상자"];
+  const LEDGER_KIND_OPTIONS = ["정규", "신규생", "샘플 후 등록", "다른 요일", "기타", "상자"];
+  // 구분 필터: 묶음 선택 + 하나씩 선택
+  const LEDGER_KIND_FILTERS = [
+    { value: "정규+신규생+다른 요일", label: "정규 + 신규생 + 다른 요일", kinds: ["정규", "신규생", "다른 요일"] },
+  ].concat(LEDGER_KIND_OPTIONS.map(k => ({ value: k, label: k, kinds: [k] })));
+  function ledgerKindFilter(v) { return LEDGER_KIND_FILTERS.find(f => f.value === v) || null; }
   const LEDGER_GROUPS = [["list", "건별"], ["day", "일별"], ["week", "주별"], ["month", "월별"], ["kind", "구분별"], ["center", "원별"]];
   const LEDGER_GROUP_HEAD = { day: "날짜", week: "주차", month: "월", kind: "구분", center: "원" };
 
@@ -1442,9 +1448,10 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   function filteredLedgerRows() {
     const lv = state.ledgerView;
     const q = (lv.q || "").trim().toLowerCase();
+    const kindFilter = lv.kind ? ledgerKindFilter(lv.kind) : null;
     return (lv.rows || []).filter(r =>
       (!lv.method || (r.method || "카드") === lv.method) &&
-      (!lv.kind || ledgerKindLabel(r) === lv.kind) &&
+      (!kindFilter || kindFilter.kinds.includes(ledgerKindLabel(r))) &&
       (!q || [r.name, r.memo, r.teacher].some(v => String(v || "").toLowerCase().includes(q)))
     );
   }
@@ -1550,7 +1557,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
           </select>
           <select id="lgKind" class="sms-input">
             <option value="">구분 전체</option>
-            ${LEDGER_KIND_OPTIONS.map(k => `<option value="${k}" ${lv.kind === k ? "selected" : ""}>${k}</option>`).join("")}
+            ${LEDGER_KIND_FILTERS.map(f => `<option value="${escapeHtml(f.value)}" ${lv.kind === f.value ? "selected" : ""}>${escapeHtml(f.label)}</option>`).join("")}
           </select>
           <input id="lgSearch" class="sms-input" placeholder="이름·메모·교사 검색" value="${escapeHtml(lv.q)}" style="flex:1; min-width:160px;" />
         </div>
@@ -1560,7 +1567,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         </div>
       </div>
       <div id="lgResults"></div>
-      <div class="sms-hint">결제를 체크하면 그 순간의 이름·금액·결제방법이 장부에 저장돼요. 명단(엑셀)을 바꿔도 지난 기록은 남아요. 이번 주 기록은 화면의 체크 상태와 같게 맞춰지고, 지난 주 기록은 그대로 보관돼요. 신규생 분류 결제는 장부에 기록되지 않아요. 엑셀에는 지금 조건의 건별 기록과 일별·주별·월별·구분별 합계가 함께 들어가요.</div>
+      <div class="sms-hint">결제를 체크하면 그 순간의 이름·금액·결제방법이 장부에 저장돼요. 명단(엑셀)을 바꿔도 지난 기록은 남아요. 이번 주 기록은 화면의 체크 상태와 같게 맞춰지고, 지난 주 기록은 그대로 보관돼요. 신규생 결제도 장부에 기록돼요. 매출 요약 합계와 매출 기록 내보내기(CSV)에는 들어가지 않아요. 엑셀에는 지금 조건의 건별 기록과 일별·주별·월별·구분별 합계가 함께 들어가요.</div>
     `;
 
     document.getElementById("lgCloseBtn").addEventListener("click", () => {
@@ -1705,12 +1712,12 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       ["원", centers.join(", ")],
       ["기간", `${lv.from} ~ ${lv.to}`],
       ["결제방법", lv.method || "전체"],
-      ["구분", lv.kind || "전체"],
+      ["구분", lv.kind ? ((ledgerKindFilter(lv.kind) || {}).label || lv.kind) : "전체"],
       ["검색", lv.q || "-"],
       ["건수", rows.length],
       ["합계", sumLedger(rows).total],
       ["저장 시각", `${fmt(now)} ${now.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })}`],
-      ["참고", "신규생 분류 결제는 장부에 기록되지 않아요."],
+      ["참고", "신규생 결제도 장부에 포함돼요. 매출 요약 합계와 매출 기록 내보내기(CSV)에는 들어가지 않아요."],
     ], [10, 40]);
 
     const who = multi ? "전체" : centers[0];
