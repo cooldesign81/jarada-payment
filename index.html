@@ -352,6 +352,57 @@
   .lg-table tr.lg-sum td { font-weight: 700; background: #FAFBF9; }
   .lg-table td.memo { white-space: normal; min-width: 120px; color: var(--ink-soft); }
   .lg-error { color: #C9401F; font-size: 12.5px; }
+
+  /* ---- 사용자 설문 ---- */
+  #surveyModal, #surveyResultsModal {
+    position: fixed; inset: 0; background: rgba(27,42,34,0.55); display: none;
+    align-items: center; justify-content: center; z-index: 999; padding: 20px;
+  }
+  #surveyModal.open, #surveyResultsModal.open { display: flex; }
+  .survey-box { width: 640px; }
+  .survey-results-box { width: 920px; }
+  .survey-banner {
+    margin-top: 16px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    padding: 12px 14px; border-radius: 10px; background: var(--accent-soft); font-size: 13px;
+  }
+  .survey-banner .sv-banner-text { flex: 1; min-width: 220px; }
+  .survey-banner .sv-banner-text b { font-weight: 700; }
+  .sv-intro { font-size: 13px; color: var(--ink-soft); line-height: 1.6; }
+  .sv-q { display: flex; flex-direction: column; gap: 8px; padding: 14px 0 4px; border-top: 1px solid var(--line); }
+  .sv-q-title { font-weight: 700; font-size: 14px; line-height: 1.5; }
+  .sv-req { color: var(--accent); margin-left: 2px; }
+  .sv-q-help { font-size: 12px; color: var(--ink-soft); }
+  .sv-opts { display: flex; flex-wrap: wrap; gap: 8px; }
+  .sv-opt {
+    font-family: var(--sans); font-size: 13px; font-weight: 600; padding: 8px 14px; border-radius: 999px;
+    border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer;
+  }
+  .sv-opt:hover { border-color: var(--accent); }
+  .sv-opt:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .sv-opt.on { background: var(--ink); border-color: var(--ink); color: #fff; }
+  .sv-scale .sv-opt { min-width: 46px; font-family: var(--mono); }
+  .sv-scale-labels { display: flex; justify-content: space-between; max-width: 290px; font-size: 11.5px; color: var(--ink-soft); }
+  .sv-textarea {
+    width: 100%; min-height: 76px; font-family: var(--sans); font-size: 13px; line-height: 1.5;
+    border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px; background: var(--bg); resize: vertical;
+  }
+  .sv-foot { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding-top: 12px; border-top: 1px solid var(--line); }
+  .sv-foot .sv-anon { flex: 1; min-width: 200px; font-size: 12.5px; color: var(--ink-soft); display: flex; gap: 6px; align-items: flex-start; }
+  .sv-error { color: #C9401F; font-size: 12.5px; }
+  .sv-stats { display: flex; gap: 20px; flex-wrap: wrap; align-items: baseline; font-size: 13px; }
+  .sv-stats b { font-family: var(--mono); font-size: 18px; color: var(--accent); }
+  .sv-card { border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 8px; }
+  .sv-card .sv-q-title { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+  .sv-card .sv-q-title span { font-weight: 500; font-size: 12px; color: var(--ink-soft); }
+  .sv-bar-row { display: grid; grid-template-columns: minmax(110px, 220px) 1fr 84px; gap: 10px; align-items: center; font-size: 13px; }
+  .sv-bar-row > span:first-child { min-width: 0; overflow-wrap: anywhere; }
+  .sv-bar { height: 10px; background: var(--bg); border-radius: 999px; overflow: hidden; }
+  .sv-bar i { display: block; height: 100%; background: var(--accent); border-radius: 999px; }
+  .sv-bar-num { text-align: right; font-family: var(--mono); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .sv-answers { display: flex; flex-direction: column; gap: 8px; max-height: 320px; overflow: auto; }
+  .sv-answer { background: var(--bg); border-radius: 8px; padding: 9px 11px; font-size: 13px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .sv-answer .sv-meta { display: block; margin-top: 4px; font-size: 11.5px; color: var(--ink-soft); white-space: normal; }
+  @media (max-width: 560px) { .sv-bar-row { grid-template-columns: 1fr 64px; } .sv-bar-row .sv-bar { grid-column: 1 / -1; grid-row: 2; } }
   .reserved-item {
     display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 8px;
     background: var(--bg); font-size: 13px;
@@ -458,6 +509,14 @@
 
   <div id="ledgerModal">
     <div class="capture-box ledger-box" id="ledgerBox"></div>
+  </div>
+
+  <div id="surveyModal">
+    <div class="capture-box survey-box" id="surveyBox"></div>
+  </div>
+
+  <div id="surveyResultsModal">
+    <div class="capture-box survey-results-box" id="surveyResultsBox"></div>
   </div>
 
   <div id="toast"></div>
@@ -573,6 +632,8 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   // 매출 장부: 결제 1건 = 문서 1개 (centers/{원}/ledger/{주차|기록키})
   function centerLedgerRef(center) { return fbDb.collection("centers").doc(center || fbCenter).collection("ledger"); }
   const CENTER_LIST = ["안양평촌원", "서초반포원", "강남대치원"];
+  // 사용자 설문 응답 (centers/{원}/feedback/{문서})
+  function centerFeedbackRef(center) { return fbDb.collection("centers").doc(center || fbCenter).collection("feedback"); }
 
   const DAY_FULL = { "월":"월요일", "화":"화요일", "수":"수요일", "목":"목요일", "금":"금요일", "토":"토요일", "일":"일요일", "기타":"기타", "전체":"전체" };
 
@@ -870,6 +931,8 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   state.tuitionSettings = loadTuitionSettings();
   state.ledgerSync = { status: "idle", at: null, message: "" };
   state.ledgerView = null;
+  state.survey = { mine: null, mineLoaded: false, bannerHidden: false, draft: {}, anonymous: false, sending: false, error: "" };
+  state.surveyResults = null;
   state.calendarOpen = false;
   state.newHolidayDate = "";
   state.newHolidayLabel = "";
@@ -1590,6 +1653,387 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     showToast(`⤓ 엑셀로 저장했어요 (${rows.length}건)`);
   }
 
+  // ---- 사용자 설문 ----
+  // 응답은 각 원의 feedback 컬렉션에 저장되고, 관리자만 "설문 결과"에서 세 원을 모아 봄.
+  // 새 설문을 하려면 id를 바꾸고 문항을 고치면 됨 (예전 응답은 id로 구분돼 그대로 남음). 마감은 open: false.
+  const SURVEY_FEATURES = [
+    "명단 업로드·결제 대상 정리", "결제·LMS·엑셀 체크", "결제 안내 문자 (전체문자·예약 발송)",
+    "신규생·기타 결제자", "연구원 상자 결제자", "매출 요약", "매출 장부·엑셀 저장", "학사달력", "백업 저장·불러오기",
+  ];
+  const SURVEY = {
+    id: "2026-11-usability",
+    open: true,
+    title: "결제 매니저 사용 설문",
+    intro: "결제 매니저를 더 편하게 고치려고 의견을 모으고 있어요. 2분이면 끝나요. 답변은 관리자만 볼 수 있어요.",
+    questions: [
+      { id: "role", type: "single", required: true, title: "어떤 일을 맡고 계세요?", options: ["원장", "실장·상담", "연구원", "기타"] },
+      { id: "freq", type: "single", required: true, title: "결제 매니저를 얼마나 자주 쓰세요?", options: ["매일", "주 3~4번", "주 1~2번", "거의 안 써요"] },
+      { id: "satisfaction", type: "scale", required: true, title: "결제 매니저에 전체적으로 얼마나 만족하세요?", min: 1, max: 5, minLabel: "매우 불만", maxLabel: "매우 만족" },
+      { id: "timeSaved", type: "single", required: true, title: "결제 매니저를 쓰고 나서 결제 관리에 드는 시간은 어떤가요?", options: ["많이 줄었어요", "조금 줄었어요", "비슷해요", "오히려 늘었어요", "잘 모르겠어요"] },
+      { id: "helpful", type: "multi", max: 3, title: "가장 도움이 되는 기능을 골라 주세요.", help: "3개까지 고를 수 있어요.", options: SURVEY_FEATURES },
+      { id: "confusing", type: "multi", exclusive: "없어요", title: "불편하거나 헷갈리는 기능이 있나요?", help: "여러 개 고를 수 있어요.", options: SURVEY_FEATURES.concat(["없어요"]) },
+      { id: "problems", type: "text", title: "쓰면서 불편했던 점이나 오류가 있었다면 적어 주세요.", placeholder: "언제, 어떤 화면에서, 무엇이 불편했는지 적어 주시면 고치기 쉬워요." },
+      { id: "wishes", type: "text", title: "새로 생겼으면 하는 기능이 있나요?", placeholder: "자유롭게 적어 주세요." },
+      { id: "comments", type: "text", title: "그 밖에 하고 싶은 말이 있으면 적어 주세요.", placeholder: "자유롭게 적어 주세요." },
+    ],
+  };
+  // 이 브라우저에서 이 계정이 이미 답했는지 (익명 답변은 서버에서 찾을 수 없어서 여기에 표시). 한 PC를 같이 써도 계정별로 따로 기억
+  function surveyDoneKey() {
+    const u = fbAuth.currentUser;
+    return u ? `jp_survey_done_${SURVEY.id}_${u.uid}` : null;
+  }
+  function surveyLocalDone() {
+    const k = surveyDoneKey();
+    if (!k) return false;
+    try { return localStorage.getItem(k) === "1"; } catch (e) { return false; }
+  }
+  function markSurveyLocalDone() {
+    const k = surveyDoneKey();
+    if (!k) return;
+    try { localStorage.setItem(k, "1"); } catch (e) {}
+  }
+  function mySurveyDocId() {
+    const u = fbAuth.currentUser;
+    return u ? `${SURVEY.id}__${u.uid}` : null;
+  }
+  function surveyAnswered() { return !!state.survey.mine || surveyLocalDone(); }
+
+  // 로그인한 계정이 이 원에 이름을 남기고 답한 적이 있는지 확인 (안내 띠 표시와 수정용)
+  async function loadMySurvey() {
+    const center = fbCenter;
+    const id = mySurveyDocId();
+    if (!center || !id || !SURVEY.open) return;
+    state.survey.mine = null;
+    state.survey.mineLoaded = false;
+    try {
+      const doc = await centerFeedbackRef(center).doc(id).get();
+      if (fbCenter !== center) return;
+      state.survey.mine = doc.exists ? doc.data() : null;
+    } catch (e) {
+      state.survey.mine = null;
+    }
+    state.survey.mineLoaded = true;
+    render();
+  }
+
+  function renderSurveyBanner() {
+    if (!fbCenter || !SURVEY.open || !state.survey.mineLoaded || surveyAnswered() || state.survey.bannerHidden) return "";
+    return `
+      <div class="survey-banner">
+        <div class="sv-banner-text"><b>📝 결제 매니저 사용 설문</b> · 쓰면서 느낀 점을 알려 주세요. 2분이면 끝나요.</div>
+        <button class="btn primary" id="surveyBannerOpenBtn">설문 참여하기</button>
+        <button class="btn ghost" id="surveyBannerLaterBtn">나중에</button>
+      </div>
+    `;
+  }
+
+  function openSurvey() {
+    if (!fbCenter) return;
+    const mine = state.survey.mine;
+    state.survey.draft = mine && mine.answers ? JSON.parse(JSON.stringify(mine.answers)) : {};
+    state.survey.anonymous = false;
+    state.survey.error = "";
+    state.survey.sending = false;
+    document.getElementById("surveyModal").classList.add("open");
+    renderSurveyBox();
+  }
+
+  function surveyAnswerValue(q, v) {
+    if (q.type === "multi") return Array.isArray(v) ? v : [];
+    return v === undefined ? null : v;
+  }
+
+  function renderSurveyQuestion(q, i) {
+    const d = state.survey.draft;
+    const v = surveyAnswerValue(q, d[q.id]);
+    const title = `<div class="sv-q-title" id="svq-${q.id}">${i + 1}. ${escapeHtml(q.title)}${q.required ? `<span class="sv-req" aria-label="필수">*</span>` : ``}</div>`;
+    const help = q.help ? `<div class="sv-q-help">${escapeHtml(q.help)}</div>` : ``;
+    if (q.type === "single" || q.type === "multi") {
+      const on = (o) => q.type === "multi" ? v.includes(o) : v === o;
+      return `<div class="sv-q">${title}${help}
+        <div class="sv-opts" role="group" aria-labelledby="svq-${q.id}">
+          ${q.options.map(o => `<button type="button" class="sv-opt ${on(o) ? "on" : ""}" aria-pressed="${on(o)}" data-svq="${q.id}" data-svv="${escapeHtml(o)}">${escapeHtml(o)}</button>`).join("")}
+        </div></div>`;
+    }
+    if (q.type === "scale") {
+      const nums = [];
+      for (let n = q.min; n <= q.max; n++) nums.push(n);
+      return `<div class="sv-q">${title}${help}
+        <div class="sv-opts sv-scale" role="group" aria-labelledby="svq-${q.id}">
+          ${nums.map(n => `<button type="button" class="sv-opt ${v === n ? "on" : ""}" aria-pressed="${v === n}" data-svq="${q.id}" data-svn="${n}">${n}</button>`).join("")}
+        </div>
+        <div class="sv-scale-labels"><span>${q.min} ${escapeHtml(q.minLabel)}</span><span>${q.max} ${escapeHtml(q.maxLabel)}</span></div>
+      </div>`;
+    }
+    return `<div class="sv-q">${title}${help}
+      <textarea class="sv-textarea" id="sv-${q.id}" data-svtext="${q.id}" placeholder="${escapeHtml(q.placeholder || "")}">${escapeHtml(v || "")}</textarea>
+    </div>`;
+  }
+
+  function renderSurveyBox() {
+    const box = document.getElementById("surveyBox");
+    if (!box) return;
+    const sv = state.survey;
+    const editing = !!sv.mine;
+    box.innerHTML = `
+      <div class="capture-actions" style="justify-content: space-between; align-items: center;">
+        <div class="sms-title">📝 ${escapeHtml(SURVEY.title)}</div>
+        <button class="btn ghost" id="surveyCloseBtn">닫기</button>
+      </div>
+      <div class="sv-intro">${escapeHtml(SURVEY.intro)}${editing ? ` 전에 보내 주신 답변을 불러왔어요. 고친 뒤 다시 보내면 바뀌어요.` : ``}${!editing && surveyLocalDone() ? ` 이 계정으로 이미 익명 답변을 보내셨어요. 다시 보내면 답변이 하나 더 쌓여요.` : ``}</div>
+      <div>${SURVEY.questions.map(renderSurveyQuestion).join("")}</div>
+      <div class="sv-foot">
+        ${editing
+          ? `<div class="sv-anon">${escapeHtml(fbCenter || "")} · ${escapeHtml((fbAuth.currentUser && fbAuth.currentUser.email) || "")} 이름으로 보낸 답변이에요.</div>`
+          : `<label class="sv-anon"><input type="checkbox" id="surveyAnon" ${sv.anonymous ? "checked" : ""} /> <span>익명으로 보내기<br />소속 원만 남고 계정 이름은 남지 않아요. 익명 답변은 나중에 고칠 수 없어요.</span></label>`}
+        <button class="btn primary" id="surveySubmitBtn" ${sv.sending ? "disabled" : ""}>${sv.sending ? "보내는 중…" : (editing ? "고쳐서 다시 보내기" : "보내기")}</button>
+      </div>
+      <div class="sv-error" id="surveyError" role="alert">${escapeHtml(sv.error || "")}</div>
+    `;
+
+    document.getElementById("surveyCloseBtn").addEventListener("click", () => {
+      document.getElementById("surveyModal").classList.remove("open");
+    });
+    box.querySelectorAll(".sv-opt").forEach(b => b.addEventListener("click", () => {
+      const q = SURVEY.questions.find(x => x.id === b.dataset.svq);
+      if (!q) return;
+      const d = sv.draft;
+      if (q.type === "scale") d[q.id] = Number(b.dataset.svn);
+      else if (q.type === "single") d[q.id] = b.dataset.svv;
+      else {
+        const val = b.dataset.svv;
+        let cur = surveyAnswerValue(q, d[q.id]).slice();
+        if (cur.includes(val)) cur = cur.filter(x => x !== val);
+        else if (q.exclusive && val === q.exclusive) cur = [val];
+        else {
+          cur = cur.filter(x => x !== q.exclusive);
+          if (q.max && cur.length >= q.max) {
+            showToast(`${q.max}개까지 고를 수 있어요. 다른 것을 먼저 빼 주세요.`);
+            return;
+          }
+          cur.push(val);
+        }
+        d[q.id] = cur;
+      }
+      // 다시 그리지 않고 이 문항 버튼 상태만 바꿈 (스크롤·입력 위치 유지)
+      const v = surveyAnswerValue(q, d[q.id]);
+      box.querySelectorAll(`.sv-opt[data-svq="${q.id}"]`).forEach(x => {
+        const isOn = q.type === "scale" ? Number(x.dataset.svn) === v : q.type === "multi" ? v.includes(x.dataset.svv) : x.dataset.svv === v;
+        x.classList.toggle("on", isOn);
+        x.setAttribute("aria-pressed", String(isOn));
+      });
+    }));
+    box.querySelectorAll("[data-svtext]").forEach(t => t.addEventListener("input", () => { sv.draft[t.dataset.svtext] = t.value; }));
+    const anon = document.getElementById("surveyAnon");
+    if (anon) anon.addEventListener("change", () => { sv.anonymous = anon.checked; });
+    document.getElementById("surveySubmitBtn").addEventListener("click", submitSurvey);
+  }
+
+  async function submitSurvey() {
+    const sv = state.survey;
+    if (sv.sending || !fbCenter) return;
+    const missing = SURVEY.questions.filter(q => q.required && (sv.draft[q.id] === undefined || sv.draft[q.id] === null || sv.draft[q.id] === ""));
+    if (missing.length) {
+      sv.error = `필수 문항에 답해 주세요: ${missing.map(q => SURVEY.questions.indexOf(q) + 1 + "번").join(", ")}`;
+      const el = document.getElementById("surveyError");
+      if (el) el.textContent = sv.error;
+      const first = document.getElementById("svq-" + missing[0].id);
+      if (first && first.scrollIntoView) first.scrollIntoView({ block: "center" });
+      return;
+    }
+    const answers = {};
+    SURVEY.questions.forEach(q => {
+      const v = sv.draft[q.id];
+      if (q.type === "text") answers[q.id] = String(v || "").trim();
+      else if (q.type === "multi") answers[q.id] = Array.isArray(v) ? v.slice() : [];
+      else answers[q.id] = v === undefined ? null : v;
+    });
+    const user = fbAuth.currentUser;
+    const anonymous = !sv.mine && sv.anonymous;
+    const now = Date.now();
+    const data = {
+      surveyId: SURVEY.id, center: fbCenter, answers, anonymous,
+      submittedAt: (sv.mine && sv.mine.submittedAt) || now, updatedAt: now,
+    };
+    if (!anonymous && user) { data.uid = user.uid; data.email = user.email || ""; }
+    sv.sending = true;
+    sv.error = "";
+    renderSurveyBox();
+    try {
+      if (anonymous) await centerFeedbackRef(fbCenter).add(data);
+      else await centerFeedbackRef(fbCenter).doc(mySurveyDocId()).set(data);
+      if (!anonymous) sv.mine = data;
+      markSurveyLocalDone();
+      sv.sending = false;
+      document.getElementById("surveyModal").classList.remove("open");
+      showToast(sv.mine && data.submittedAt !== now ? "✅ 답변을 고쳤어요. 고마워요!" : "✅ 설문을 보냈어요. 고마워요!");
+      render();
+    } catch (e) {
+      sv.sending = false;
+      sv.error = e && e.code === "permission-denied"
+        ? "보내지 못했어요. 저장 권한이 없어요. 관리자에게 알려 주세요."
+        : "보내지 못했어요. 인터넷 연결을 확인하고 다시 눌러 주세요.";
+      renderSurveyBox();
+    }
+  }
+
+  // ---- 설문 결과 (관리자) ----
+  function openSurveyResults() {
+    if (!state.isAdmin) return;
+    state.surveyResults = { center: "all", rows: null, loading: false, errors: [] };
+    document.getElementById("surveyResultsModal").classList.add("open");
+    renderSurveyResultsBox();
+    loadSurveyResults();
+  }
+
+  async function loadSurveyResults() {
+    const sr = state.surveyResults;
+    if (!sr) return;
+    const centers = sr.center === "all" ? CENTER_LIST.slice() : [sr.center];
+    const token = (loadSurveyResults._t = (loadSurveyResults._t || 0) + 1);
+    sr.loading = true;
+    sr.errors = [];
+    renderSurveyResultsBody();
+    const results = await Promise.all(centers.map(c =>
+      centerFeedbackRef(c).where("surveyId", "==", SURVEY.id).get()
+        .then(snap => ({ c, docs: snap.docs.map(d => { const x = d.data(); return { ...x, id: d.id, center: x.center || c }; }) }))
+        .catch(e => ({ c, error: e && e.code === "permission-denied" ? "읽기 권한이 없어요" : ((e && e.message) || String(e)) }))
+    ));
+    if (token !== loadSurveyResults._t || state.surveyResults !== sr) return;
+    sr.rows = [].concat(...results.map(r => r.docs || [])).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    sr.errors = results.filter(r => r.error).map(r => `${r.c}: ${r.error}`);
+    sr.loading = false;
+    renderSurveyResultsBody();
+  }
+
+  function surveyCounts(q, rows) {
+    const counts = new Map(((q.type === "scale" ? Array.from({ length: q.max - q.min + 1 }, (_, i) => q.max - i) : q.options)).map(o => [o, 0]));
+    let answered = 0;
+    rows.forEach(r => {
+      const v = r.answers ? r.answers[q.id] : undefined;
+      if (q.type === "multi") {
+        if (Array.isArray(v) && v.length) { answered++; v.forEach(x => counts.set(x, (counts.get(x) || 0) + 1)); }
+      } else if (v !== undefined && v !== null && v !== "") {
+        answered++;
+        counts.set(v, (counts.get(v) || 0) + 1);
+      }
+    });
+    let list = Array.from(counts.entries());
+    if (q.type === "multi") list = list.sort((a, b) => b[1] - a[1]);
+    return { list, answered };
+  }
+
+  function surveyMeta(r) {
+    const role = r.answers && r.answers.role ? ` · ${r.answers.role}` : "";
+    const who = r.anonymous ? "익명" : (r.email || "이름 없음");
+    const when = r.updatedAt ? fmt(new Date(r.updatedAt)) : "";
+    return `${r.center}${role} · ${who} · ${when}`;
+  }
+
+  function renderSurveyResultsBox() {
+    const box = document.getElementById("surveyResultsBox");
+    const sr = state.surveyResults;
+    if (!box || !sr) return;
+    box.innerHTML = `
+      <div class="capture-actions" style="justify-content: space-between; align-items: center; flex-wrap: wrap;">
+        <div class="sms-title">📊 설문 결과 <span class="mono" style="font-size:12px;">${escapeHtml(SURVEY.title)}</span></div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <select id="svrCenter" class="sms-input">
+            <option value="all" ${sr.center === "all" ? "selected" : ""}>세 원 전체</option>
+            ${CENTER_LIST.map(c => `<option value="${escapeHtml(c)}" ${sr.center === c ? "selected" : ""}>${escapeHtml(c)}</option>`).join("")}
+          </select>
+          <button class="btn primary" id="svrExportBtn">⤓ 엑셀로 저장</button>
+          <button class="btn ghost" id="svrCloseBtn">닫기</button>
+        </div>
+      </div>
+      <div id="svrBody" style="display:flex; flex-direction:column; gap:12px;"></div>
+    `;
+    document.getElementById("svrCloseBtn").addEventListener("click", () => {
+      document.getElementById("surveyResultsModal").classList.remove("open");
+    });
+    document.getElementById("svrExportBtn").addEventListener("click", exportSurveyXlsx);
+    const sel = document.getElementById("svrCenter");
+    sel.addEventListener("change", () => { sr.center = sel.value; loadSurveyResults(); });
+    renderSurveyResultsBody();
+  }
+
+  function renderSurveyResultsBody() {
+    const el = document.getElementById("svrBody");
+    const sr = state.surveyResults;
+    if (!el || !sr) return;
+    const errors = (sr.errors || []).map(e => `<div class="lg-error">⚠ ${escapeHtml(e)}</div>`).join("");
+    if (sr.loading || !sr.rows) { el.innerHTML = `${errors}<div class="sms-hint">불러오는 중…</div>`; return; }
+    const rows = sr.rows;
+    if (!rows.length) { el.innerHTML = `${errors}<div class="sms-hint" style="padding:16px 0;">아직 응답이 없어요. 선생님들 화면 위쪽에 설문 안내가 떠 있어요.</div>`; return; }
+    const sat = SURVEY.questions.find(q => q.id === "satisfaction");
+    const satVals = rows.map(r => r.answers && r.answers.satisfaction).filter(v => typeof v === "number");
+    const avg = satVals.length ? (satVals.reduce((a, b) => a + b, 0) / satVals.length) : null;
+    const byCenter = CENTER_LIST.map(c => [c, rows.filter(r => r.center === c).length]).filter(([, n]) => n);
+    let html = `${errors}
+      <div class="sv-stats">
+        <span>응답 <b>${rows.length}</b>명</span>
+        ${avg !== null ? `<span>평균 만족도 <b>${avg.toFixed(1)}</b> / ${sat ? sat.max : 5}</span>` : ``}
+        <span>익명 ${rows.filter(r => r.anonymous).length}명</span>
+        ${sr.center === "all" ? `<span class="sms-hint" style="font-size:12.5px;">${byCenter.map(([c, n]) => `${escapeHtml(c)} ${n}명`).join(" · ")}</span>` : ``}
+      </div>`;
+    SURVEY.questions.forEach((q, i) => {
+      if (q.type === "text") {
+        const answers = rows.filter(r => r.answers && String(r.answers[q.id] || "").trim());
+        html += `<div class="sv-card">
+          <div class="sv-q-title">${i + 1}. ${escapeHtml(q.title)} <span>${answers.length}개 답변</span></div>
+          ${answers.length ? `<div class="sv-answers">${answers.map(r => `<div class="sv-answer">${escapeHtml(r.answers[q.id])}<span class="sv-meta">${escapeHtml(surveyMeta(r))}</span></div>`).join("")}</div>` : `<div class="sms-hint">아직 적힌 답변이 없어요.</div>`}
+        </div>`;
+        return;
+      }
+      const { list, answered } = surveyCounts(q, rows);
+      const denom = answered || 1;
+      html += `<div class="sv-card">
+        <div class="sv-q-title">${i + 1}. ${escapeHtml(q.title)} <span>${answered}명 답함${q.type === "multi" ? " · 여러 개 선택" : ""}</span></div>
+        ${list.map(([label, n]) => `<div class="sv-bar-row">
+          <span>${q.type === "scale" ? `${label}점${label === q.max ? ` ${escapeHtml(q.maxLabel)}` : label === q.min ? ` ${escapeHtml(q.minLabel)}` : ""}` : escapeHtml(label)}</span>
+          <span class="sv-bar"><i style="width:${Math.round((n / denom) * 100)}%"></i></span>
+          <span class="sv-bar-num">${n}명 · ${Math.round((n / denom) * 100)}%</span>
+        </div>`).join("")}
+      </div>`;
+    });
+    el.innerHTML = html;
+  }
+
+  function exportSurveyXlsx() {
+    const sr = state.surveyResults;
+    if (!sr || sr.loading || !sr.rows) { showToast("결과를 불러온 뒤에 저장해 주세요"); return; }
+    if (!sr.rows.length) { showToast("저장할 응답이 없어요"); return; }
+    const rows = sr.rows.slice().sort((a, b) => (a.updatedAt || 0) - (b.updatedAt || 0));
+    const wb = XLSX.utils.book_new();
+    const addSheet = (name, aoa, widths) => {
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      ws["!cols"] = widths.map(w => ({ wch: w }));
+      XLSX.utils.book_append_sheet(wb, ws, name);
+    };
+    const head = ["보낸 날", "원", "보낸 사람"].concat(SURVEY.questions.map((q, i) => `${i + 1}. ${q.title}`));
+    const body = rows.map(r => [r.updatedAt ? fmt(new Date(r.updatedAt)) : "", r.center, r.anonymous ? "익명" : (r.email || "")].concat(
+      SURVEY.questions.map(q => {
+        const v = r.answers ? r.answers[q.id] : "";
+        return Array.isArray(v) ? v.join(", ") : (v === null || v === undefined ? "" : v);
+      })));
+    addSheet("응답", [head].concat(body), [11, 11, 24].concat(SURVEY.questions.map(q => q.type === "text" ? 40 : 18)));
+    const summary = [["문항", "보기", "응답 수", "비율"]];
+    SURVEY.questions.filter(q => q.type !== "text").forEach((q, i) => {
+      const { list, answered } = surveyCounts(q, rows);
+      list.forEach(([label, n], j) => summary.push([j === 0 ? `${SURVEY.questions.indexOf(q) + 1}. ${q.title}` : "", q.type === "scale" ? `${label}점` : label, n, answered ? Math.round((n / answered) * 1000) / 10 + "%" : "0%"]));
+    });
+    addSheet("요약", summary, [44, 30, 9, 8]);
+    const who = sr.center === "all" ? "전체" : sr.center;
+    const out = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+    const blob = new Blob([out], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `설문결과_${who}_${fmt(new Date())}.xlsx`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    showToast(`⤓ 설문 결과를 엑셀로 저장했어요 (${rows.length}명)`);
+  }
+
   // 실시간 이번 주(현재 로드된 명단 기준) 결제완료 합계 — 별도 저장 안 하고 현재 체크 상태 그대로 집계
   function weekRevenueLive() {
     const byMethod = { "카드": 0, "이체": 0, "제로페이": 0, "현금": 0 };
@@ -1663,6 +2107,8 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     state.extraPayers = {};
     state.ledgerSync = { status: "idle", at: null, message: "" };
     state.ledgerView = null;
+    state.survey = { mine: null, mineLoaded: false, bannerHidden: state.survey ? state.survey.bannerHidden : false, draft: {}, anonymous: false, sending: false, error: "" };
+    state.surveyResults = null;
   }
 
   function saveExtraPayers() {
@@ -2337,6 +2783,8 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
           <input type="date" class="refdate" id="refDateInput" value="${fmt(state.refDate)}" title="기준일 (보통 오늘)" />
           <button class="btn" id="calendarOpenBtn">📅 학사달력</button>
           <button class="btn" id="ledgerOpenBtn">📒 매출 장부</button>
+          ${fbCenter && SURVEY.open ? `<button class="btn" id="surveyOpenBtn">📝 설문</button>` : ``}
+          ${state.isAdmin ? `<button class="btn" id="surveyResultsOpenBtn">📊 설문 결과</button>` : ``}
           <button class="btn primary" id="uploadBtn">⬆ 명단 업로드</button>
           ${state.students ? `<button class="btn" id="exportBtn">⤓ 백업 저장</button>` : ``}
           <button class="btn" id="importBtn">⤒ 백업 불러오기</button>
@@ -2352,6 +2800,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     if (state.message) {
       html += `<div class="banner ${state.messageType}">${escapeHtml(state.message)}</div>`;
     }
+    html += renderSurveyBanner();
 
     if (!state.students) {
       html += `
@@ -2595,6 +3044,14 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
 
     const exportRevenueBtn = document.getElementById("exportRevenueBtn");
     if (exportRevenueBtn) exportRevenueBtn.addEventListener("click", exportWeekRevenueCsv);
+    ["surveyOpenBtn", "surveyBannerOpenBtn"].forEach(id => {
+      const b = document.getElementById(id);
+      if (b) b.addEventListener("click", openSurvey);
+    });
+    const surveyBannerLaterBtn = document.getElementById("surveyBannerLaterBtn");
+    if (surveyBannerLaterBtn) surveyBannerLaterBtn.addEventListener("click", () => { state.survey.bannerHidden = true; render(); });
+    const surveyResultsOpenBtn = document.getElementById("surveyResultsOpenBtn");
+    if (surveyResultsOpenBtn) surveyResultsOpenBtn.addEventListener("click", openSurveyResults);
     ["ledgerOpenBtn", "ledgerOpenBtn2"].forEach(id => {
       const b = document.getElementById(id);
       if (b) b.addEventListener("click", openLedgerModal);
@@ -3534,6 +3991,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
 
   function startFirestoreSync() {
     stopFirestoreSync();
+    loadMySurvey();
 
     unsubRoster = centerRosterRef().onSnapshot(doc => {
       const data = doc.exists ? doc.data() : null;
