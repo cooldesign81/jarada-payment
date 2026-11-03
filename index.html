@@ -232,6 +232,9 @@
   .auth-title { font-size: 13px; color: var(--ink-soft); margin-bottom: 6px; text-align: center; }
   .auth-input { width: 100%; padding: 10px 12px; font-size: 14px; }
   .auth-btn { width: 100%; justify-content: center; padding: 11px; font-size: 14px; margin-top: 4px; }
+  .auth-hint { font-size: 12px; color: var(--ink-soft); text-align: center; line-height: 1.5; margin: 2px 0 6px; }
+  .auth-or { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-soft); margin: 8px 0 2px; }
+  .auth-or::before, .auth-or::after { content: ""; flex: 1; border-top: 1px solid #E5E5E5; }
   .auth-error { color: #C9401F; font-size: 12.5px; text-align: center; min-height: 16px; }
   .logout-link { font-size: 11.5px; color: rgba(255,255,255,0.65); text-decoration: underline; cursor: pointer; }
   .logout-link:hover { color: #fff; }
@@ -466,10 +469,12 @@
     <div class="auth-box">
       <div class="auth-logo"><span class="brand-word"><span class="c1">자</span><span class="c2">라</span><span class="c3">다</span></span> JP 결제 매니저</div>
       <div id="authForm">
-        <div class="auth-title">로그인</div>
+        <button class="btn primary auth-btn" id="authGoogleBtn" type="button">구글로 로그인</button>
+        <div class="auth-hint">JP ONE 직원 계정(관리자)으로 들어와요. 처음 한 번만 누르면 이 기기에서는 계속 로그인돼 있어요.</div>
+        <div class="auth-or"><span>원 공용 계정</span></div>
         <input id="authEmail" class="sms-input auth-input" type="email" placeholder="이메일" />
         <input id="authPassword" class="sms-input auth-input" type="password" placeholder="비밀번호" />
-        <button class="btn primary auth-btn" id="authLoginBtn">로그인</button>
+        <button class="btn auth-btn" id="authLoginBtn">로그인</button>
         <div id="authError" class="auth-error"></div>
       </div>
     </div>
@@ -3485,6 +3490,14 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   function hideCenterScreen() { document.getElementById("centerScreen").classList.remove("open"); }
 
   function attachAuthEvents() {
+    const gBtn = document.getElementById("authGoogleBtn");
+    if (gBtn) gBtn.addEventListener("click", async () => {
+      const errEl = document.getElementById("authError"); errEl.textContent = "";
+      gBtn.disabled = true;
+      try { await fbAuth.signInWithPopup(new firebase.auth.GoogleAuthProvider()); }
+      catch (e) { if (e.code !== "auth/popup-closed-by-user") errEl.textContent = "구글 로그인에 실패했어요. 다시 시도해 주세요."; }
+      gBtn.disabled = false;
+    });
     const loginBtn = document.getElementById("authLoginBtn");
     if (loginBtn) loginBtn.addEventListener("click", async () => {
       const email = document.getElementById("authEmail").value.trim();
@@ -3509,6 +3522,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       if (!user) return;
       confirmBtn.disabled = true;
       try {
+        if (state.payCenters && !state.payCenters.includes(center)) { confirmBtn.disabled = false; return; }
         await userCenterRef(user.uid).set({ center, email: user.email || "" });
         fbCenter = center;
         hideCenterScreen();
@@ -3627,12 +3641,35 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       showAuthScreen();
       return;
     }
-    hideAuthScreen();
     state.isAdmin = ADMIN_EMAILS.includes((user.email || "").toLowerCase());
+    // 구글 로그인: JP ONE '앱에 명단 보내기'로 받은 명단(payAccess)에 있어야 하고, 적힌 원만 쓸 수 있음
+    state.payCenters = null;
+    const isGoogle = (user.providerData || []).some(p => p.providerId === "google.com");
+    if (isGoogle && !state.isAdmin) {
+      try {
+        const acc = await fbDb.collection("payAccess").doc((user.email || "").toLowerCase()).get();
+        state.payCenters = acc.exists ? (acc.data().centers || []).filter(c => CENTER_LIST.includes(c)) : [];
+      } catch (e) { state.payCenters = []; }
+      if (!state.payCenters.length) {
+        await fbAuth.signOut();
+        document.getElementById("authError").textContent = `${user.email} 계정은 결제 매니저 명단에 없어요. JP ONE 관리자에게 등록을 요청하거나 원 공용 계정으로 로그인해 주세요.`;
+        return;
+      }
+    }
+    hideAuthScreen();
+    const sel = document.getElementById("centerSelect");
+    if (sel) sel.innerHTML = (state.payCenters || CENTER_LIST).map(c => `<option value="${c}">${c}</option>`).join("");
     try {
       const snap = await userCenterRef(user.uid).get();
-      if (snap.exists && snap.data().center) {
+      const saved = snap.exists && snap.data().center;
+      if (saved && (!state.payCenters || state.payCenters.includes(saved))) {
         fbCenter = snap.data().center;
+        hideCenterScreen();
+        startFirestoreSync();
+      } else if (state.payCenters && state.payCenters.length === 1) {
+        // 원이 하나뿐이면 묻지 않고 정함
+        await userCenterRef(user.uid).set({ center: state.payCenters[0], email: user.email || "" });
+        fbCenter = state.payCenters[0];
         hideCenterScreen();
         startFirestoreSync();
       } else {
