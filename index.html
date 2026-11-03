@@ -2345,6 +2345,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
           <button class="btn" id="calendarOpenBtn">📅 학사달력</button>
           <button class="btn" id="ledgerOpenBtn">📒 매출 장부</button>
           <button class="btn primary" id="uploadBtn">⬆ 명단 업로드</button>
+          ${state.activeDay ? `<button class="btn" id="captureBtn">📸 캡처</button><button class="btn" id="printBtn">🖨 인쇄</button>` : ``}
           <button class="btn" id="smsSettingsOpenBtn">⚙ 설정</button>
           <input type="file" accept=".xlsx,.xls" id="fileInput" style="display:none" />
           <input type="file" accept=".json" id="importInput" style="display:none" />
@@ -2391,8 +2392,6 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       });
       html += `</div>`;
       if (state.activeDay) {
-        html += `<button class="btn" id="captureBtn">캡처</button>`;
-        html += `<button class="btn" id="printBtn">인쇄</button>`;
         html += `<button class="btn primary" id="smsOpenBtn">💬 문자</button>`;
         html += `<button class="btn primary" id="autoSmsOpenBtn">🤖 전체문자</button>`;
       }
