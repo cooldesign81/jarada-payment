@@ -2345,11 +2345,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
           <button class="btn" id="calendarOpenBtn">📅 학사달력</button>
           <button class="btn" id="ledgerOpenBtn">📒 매출 장부</button>
           <button class="btn primary" id="uploadBtn">⬆ 명단 업로드</button>
-          ${state.students ? `<button class="btn" id="exportBtn">⤓ 백업 저장</button>` : ``}
-          <button class="btn" id="importBtn">⤒ 백업 불러오기</button>
-          ${state.students ? `<button class="btn ghost" id="clearBtn">🗑 체크 초기화</button>` : ``}
           <button class="btn" id="smsSettingsOpenBtn">⚙ 설정</button>
-          <button class="btn" id="reservedSmsOpenBtn">📋 예약 취소</button>
           <input type="file" accept=".xlsx,.xls" id="fileInput" style="display:none" />
           <input type="file" accept=".json" id="importInput" style="display:none" />
         </div>
@@ -2400,6 +2396,8 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         html += `<button class="btn primary" id="smsOpenBtn">💬 문자</button>`;
         html += `<button class="btn primary" id="autoSmsOpenBtn">🤖 전체문자</button>`;
       }
+      // 예약해 둔 문자 보기·취소 (문자 기능이라 문자 버튼 옆에 둠)
+      html += `<button class="btn" id="reservedSmsOpenBtn">📋 문자 대기열</button>`;
       html += `</div>`;
 
       const activeList = getActiveList();
@@ -2446,7 +2444,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       });
       html += `</tbody></table></div></div>`;
       html += `</div>`;
-      html += `<div class="footer-note">체크 상태는 이 브라우저(${weekKey()} 기준 주차)에 자동 저장돼요. 다른 PC로 옮기거나 안전하게 백업하려면 "백업 저장"을 눌러 파일로 내려받아두세요.</div>`;
+      html += `<div class="footer-note">체크 상태는 이 브라우저(${weekKey()} 기준 주차)에 자동 저장돼요. 다른 PC로 옮기거나 안전하게 백업하려면 ⚙ 설정의 "백업 저장"을 눌러 파일로 내려받아두세요.</div>`;
       html += `<div class="capture-hint">할인 열은 업로드한 파일의 '관리그룹' 값을 그대로 보여줘요.</div>`;
 
       html += renderExtraPayersCard();
@@ -2540,20 +2538,13 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       e.target.value = "";
     });
 
-    const exportBtn = document.getElementById("exportBtn");
-    if (exportBtn) exportBtn.addEventListener("click", exportBackup);
-
     const importInput = document.getElementById("importInput");
-    const importBtn = document.getElementById("importBtn");
-    if (importBtn) importBtn.addEventListener("click", () => importInput && importInput.click());
     if (importInput) importInput.addEventListener("change", (e) => {
       const file = e.target.files[0];
       if (file) importBackup(file);
       e.target.value = "";
     });
 
-    const clearBtn = document.getElementById("clearBtn");
-    if (clearBtn) clearBtn.addEventListener("click", clearChecklist);
 
     document.querySelectorAll(".tab").forEach(t => {
       t.addEventListener("click", () => {
@@ -2946,7 +2937,22 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         </div>
         <div class="sms-hint">학원명은 화면 상단 표시, 인쇄 제목, 문자의 {센터명}에 쓰여요. 명단 업로드 시 '관리그룹' 값에 형제/장기 글자가 들어있으면 자동으로 해당 할인이 적용돼요. '기타 할인'은 5번 내용칸에 적은 글자(예: "우수")가 관리그룹 값에 포함된 경우에만 적용돼요. 6번 계좌정보는 문자 발송의 {지역원계좌정보}에 그대로 들어가요.</div>
       </div>
+      <div class="sms-section" style="border-top: 1px solid var(--line); padding-top: 14px;">
+        <div class="sms-section-title">백업 · 초기화</div>
+        <div class="cal-add-row" style="flex-wrap: wrap; gap: 8px;">
+          ${state.students ? `<button class="btn" id="exportBtn">⤓ 백업 저장</button>` : ``}
+          <button class="btn" id="importBtn">⤒ 백업 불러오기</button>
+          ${state.students ? `<button class="btn ghost" id="clearBtn">🗑 체크 초기화</button>` : ``}
+        </div>
+        <div class="sms-hint">백업 저장은 이번 주 체크 상태를 파일로 내려받아요. 체크 초기화는 이번 주 체크를 모두 지워요.</div>
+      </div>
     `;
+    const exportBtn = document.getElementById("exportBtn");
+    if (exportBtn) exportBtn.addEventListener("click", exportBackup);
+    const importBtn = document.getElementById("importBtn");
+    if (importBtn) importBtn.addEventListener("click", () => document.getElementById("importInput")?.click());
+    const clearBtn = document.getElementById("clearBtn");
+    if (clearBtn) clearBtn.addEventListener("click", () => { document.getElementById("smsSettingsModal").classList.remove("open"); clearChecklist(); });
     const closeBtn = document.getElementById("smsSettingsCloseBtn");
     if (closeBtn) closeBtn.addEventListener("click", () => {
       document.getElementById("smsSettingsModal").classList.remove("open");
