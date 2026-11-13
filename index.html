@@ -359,6 +359,21 @@
   .lg-table tr.lg-sum td { font-weight: 700; background: #FAFBF9; }
   .lg-table td.memo { white-space: normal; min-width: 120px; color: var(--ink-soft); }
   .lg-error { color: #C9401F; font-size: 12.5px; }
+  .lg-badge { display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 700; background: var(--amber-soft); color: #8A5A00; white-space: nowrap; vertical-align: 1px; }
+  .lg-badge.cancel { background: #FCEAE8; color: #A3402F; }
+  .lg-orig { display: block; font-size: 11px; color: var(--ink-soft); text-decoration: line-through; }
+  .lg-note { display: block; margin-top: 2px; color: var(--ink); }
+  .lg-edit-btn { font-family: var(--sans); font-size: 12px; font-weight: 600; border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 6px; padding: 3px 8px; cursor: pointer; white-space: nowrap; }
+  .lg-edit-btn:hover { border-color: var(--accent); }
+  .lg-table tr.lg-row-editing td { background: var(--accent-soft); }
+  .lg-edit-card { border: 1px solid var(--accent); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 10px; background: var(--surface); }
+  .lg-edit-head { display: flex; gap: 8px; flex-wrap: wrap; align-items: baseline; font-size: 14px; }
+  .lg-edit-head .lg-sub { font-size: 12px; }
+  .lg-edit-card .lg-field { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; color: var(--ink-soft); }
+  .lg-edit-card .sms-input { padding: 7px 9px; background: var(--surface); }
+  .lg-edit-card textarea { width: 100%; min-height: 64px; font-family: var(--sans); font-size: 13px; line-height: 1.5; border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px; background: var(--bg); resize: vertical; }
+  .lg-history { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--ink-soft); border-top: 1px solid var(--line); padding-top: 8px; }
+  .lg-history b { color: var(--ink); }
 
   /* ---- 사용자 설문 ---- */
   #surveyModal, #surveyResultsModal {
@@ -1145,6 +1160,17 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   // 명단(엑셀)을 갈아 끼워도 지난 결제 기록이 남고, 월별·기간별로 모아 보거나 엑셀로 받을 수 있음.
   const LEDGER_FIELDS = ["center", "week", "key", "kind", "category", "paidDate", "month", "day", "name", "age", "teacher", "time", "method", "amount", "memo", "nextTerm"];
   const LEDGER_FULL_SYNC_KINDS = ["기타", "상자"]; // ✕로 지운 결제자도 반영되도록 "없으면 삭제"하는 구분
+  // 장부에서 직접 고친 내용은 결제 체크와 맞추는 동기화가 건드리지 않는 별도 칸에 저장
+  //   status: 상태, adjAmount: 고친 금액, adjMethod: 고친 결제방법, note: 장부 메모, history: 수정 기록
+  // 합계·필터·엑셀은 고친 값(없으면 원래 값)을 씀
+  const LEDGER_STATUS_OPTIONS = ["정상", "부분 취소", "전액 취소", "결제방법 변경", "금액 정정"];
+  function ledgerAdjusted(v) { return v !== undefined && v !== null; }
+  function ledgerAmount(r) { return ledgerAdjusted(r.adjAmount) ? Number(r.adjAmount) || 0 : Number(r.amount) || 0; }
+  function ledgerMethod(r) { return r.adjMethod || r.method || "카드"; }
+  function ledgerStatus(r) { return r.status && r.status !== "정상" ? r.status : ""; }
+  function ledgerHasManual(r) {
+    return !!(ledgerStatus(r) || r.note || ledgerAdjusted(r.adjAmount) || r.adjMethod || (Array.isArray(r.history) && r.history.length));
+  }
   let unsubLedgerWeek = null;
   let ledgerWeekCache = null;      // 지금 주차의 장부 문서 (docId -> data)
   let ledgerWeekKey = null;
@@ -1242,13 +1268,18 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       incoming.add(id);
       const data = ledgerRowData(r, wk);
       const prev = ledgerWeekCache.get(id);
-      if (!prev || LEDGER_FIELDS.some(f => prev[f] !== data[f])) ops.push({ id, data });
+      // 숨겨 둔 기록(아래 참고)을 다시 체크하면 고친 내용과 함께 다시 보이게
+      if (!prev || prev.removed || LEDGER_FIELDS.some(f => prev[f] !== data[f])) ops.push({ id, data: prev && prev.removed ? { ...data, removed: false } : data });
     });
     ledgerWeekCache.forEach((d, id) => {
       if (incoming.has(id)) return;
       // 삭제는 두 경우만: 화면에 보이는데 결제 안 된 사람, ✕로 지운 기타·상자 결제자
       // → 토요일에 명단을 갈아 끼워 화면에서 사라진 학생의 결제 기록은 그대로 남음
-      if (unpaid.has(d.key) || LEDGER_FULL_SYNC_KINDS.includes(d.kind)) ops.push({ id, del: true });
+      if (unpaid.has(d.key) || LEDGER_FULL_SYNC_KINDS.includes(d.kind)) {
+        // 장부에서 메모·금액·취소 상태를 고친 기록은 지우지 않고 숨김 표시만 (수정 기록 보존)
+        if (ledgerHasManual(d)) { if (!d.removed) ops.push({ id, hide: true }); }
+        else ops.push({ id, del: true });
+      }
     });
     if (!ops.length) {
       if (state.ledgerSync.status !== "ok") {
@@ -1267,7 +1298,9 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         const batch = fbDb.batch();
         ops.slice(i, i + 400).forEach(op => {
           if (op.del) batch.delete(ref.doc(op.id));
-          else batch.set(ref.doc(op.id), { ...op.data, updatedAt: Date.now(), updatedBy: by });
+          else if (op.hide) batch.set(ref.doc(op.id), { removed: true, updatedAt: Date.now(), updatedBy: by }, { merge: true });
+          // merge: 장부에서 고친 칸(status·adjAmount·adjMethod·note·history)은 그대로 둠
+          else batch.set(ref.doc(op.id), { ...op.data, updatedAt: Date.now(), updatedBy: by }, { merge: true });
         });
         await batch.commit();
       }
@@ -1341,8 +1374,8 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   function defaultLedgerView() {
     return {
       owner: fbCenter, centers: fbCenter, ...ledgerPresetRange("month"),
-      method: "", kind: "", q: "", group: "list", split: true,
-      rows: null, loading: false, errors: [], loadedKey: "",
+      method: "", kind: "", status: "", q: "", group: "list", split: true,
+      rows: null, loading: false, errors: [], loadedKey: "", editing: null, editDraft: null,
     };
   }
 
@@ -1379,10 +1412,11 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     const lv = state.ledgerView;
     const q = (lv.q || "").trim().toLowerCase();
     const kindFilter = lv.kind ? ledgerKindFilter(lv.kind) : null;
-    return (lv.rows || []).filter(r =>
-      (!lv.method || (r.method || "카드") === lv.method) &&
+    return (lv.rows || []).filter(r => !r.removed &&
+      (!lv.method || ledgerMethod(r) === lv.method) &&
       (!kindFilter || kindFilter.kinds.includes(ledgerKindLabel(r))) &&
-      (!q || [r.name, r.memo, r.teacher].some(v => String(v || "").toLowerCase().includes(q)))
+      (!lv.status || (lv.status === "edited" ? ledgerHasManual(r) : (r.status || "정상") === lv.status)) &&
+      (!q || [r.name, r.memo, r.teacher, r.note].some(v => String(v || "").toLowerCase().includes(q)))
     );
   }
 
@@ -1397,7 +1431,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   function sumLedger(rows) {
     const by = { "카드": 0, "이체": 0, "제로페이": 0, "현금": 0 };
     let total = 0;
-    rows.forEach(r => { const a = Number(r.amount) || 0; total += a; const m = r.method || "카드"; by[m] = (by[m] || 0) + a; });
+    rows.forEach(r => { const a = ledgerAmount(r); total += a; const m = ledgerMethod(r); by[m] = (by[m] || 0) + a; });
     return { count: rows.length, total, by };
   }
 
@@ -1489,6 +1523,11 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
             <option value="">구분 전체</option>
             ${LEDGER_KIND_FILTERS.map(f => `<option value="${escapeHtml(f.value)}" ${lv.kind === f.value ? "selected" : ""}>${escapeHtml(f.label)}</option>`).join("")}
           </select>
+          <select id="lgStatus" class="sms-input">
+            <option value="">상태 전체</option>
+            <option value="edited" ${lv.status === "edited" ? "selected" : ""}>메모·수정한 기록만</option>
+            ${LEDGER_STATUS_OPTIONS.filter(x => x !== "정상").map(x => `<option value="${x}" ${lv.status === x ? "selected" : ""}>${x}</option>`).join("")}
+          </select>
           <input id="lgSearch" class="sms-input" placeholder="이름·메모·교사 검색" value="${escapeHtml(lv.q)}" style="flex:1; min-width:160px;" />
         </div>
         <div class="lg-row">
@@ -1497,7 +1536,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         </div>
       </div>
       <div id="lgResults"></div>
-      <div class="sms-hint">결제를 체크하면 그 순간의 이름·금액·결제방법이 장부에 저장돼요. 명단(엑셀)을 바꿔도 지난 기록은 남아요. 이번 주 기록은 화면의 체크 상태와 같게 맞춰지고, 지난 주 기록은 그대로 보관돼요. 신규생 결제도 장부에 기록돼요. 매출 요약 합계와 매출 기록 내보내기(CSV)에는 들어가지 않아요. 엑셀에는 지금 조건의 건별 기록과 일별·주별·월별·구분별 합계가 함께 들어가요.</div>
+      <div class="sms-hint">결제를 체크하면 그 순간의 이름·금액·결제방법이 장부에 저장돼요. 명단(엑셀)을 바꿔도 지난 기록은 남아요. 이번 주 기록은 화면의 체크 상태와 같게 맞춰지고, 지난 주 기록은 그대로 보관돼요. 신규생 결제도 장부에 기록돼요. 매출 요약 합계와 매출 기록 내보내기(CSV)에는 들어가지 않아요. 엑셀에는 지금 조건의 건별 기록과 일별·주별·월별·구분별 합계가 함께 들어가요. 카드 변경·부분 취소·취소 같은 일은 건별 목록의 ✎ 수정에서 메모와 금액·결제방법·상태를 고치면 돼요. 고친 값이 합계와 엑셀에 들어가고, 누가 언제 고쳤는지 수정 기록에 남아요.</div>
     `;
 
     document.getElementById("lgCloseBtn").addEventListener("click", () => {
@@ -1538,6 +1577,8 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     methodSel.addEventListener("change", () => { lv.method = methodSel.value; renderLedgerResults(); });
     const kindSel = document.getElementById("lgKind");
     kindSel.addEventListener("change", () => { lv.kind = kindSel.value; renderLedgerResults(); });
+    const statusSel = document.getElementById("lgStatus");
+    statusSel.addEventListener("change", () => { lv.status = statusSel.value; renderLedgerResults(); });
     const search = document.getElementById("lgSearch");
     search.addEventListener("input", () => { lv.q = search.value; renderLedgerResults(); });
     box.querySelectorAll("[data-lggroup]").forEach(b => b.addEventListener("click", () => {
@@ -1552,6 +1593,12 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     const el = document.getElementById("lgResults");
     const lv = state.ledgerView;
     if (!el || !lv) return;
+    // 검색 등으로 다시 그릴 때 수정 칸에 쓰던 내용을 잃지 않게
+    const edStatus = document.getElementById("lgEdStatus");
+    if (lv.editing && edStatus) {
+      lv.editDraft = { key: lv.editing, status: edStatus.value, amount: document.getElementById("lgEdAmount").value,
+        method: document.getElementById("lgEdMethod").value, note: document.getElementById("lgEdNote").value };
+    }
     const won = (n) => `${(Number(n) || 0).toLocaleString()}원`;
     const errors = (lv.errors || []).map(e => `<div class="lg-error">⚠ ${escapeHtml(e)}</div>`).join("");
     if (lv.loading || !lv.rows) { el.innerHTML = `${errors}<div class="sms-hint">불러오는 중…</div>`; return; }
@@ -1575,14 +1622,24 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     if (lv.group === "list") {
       const LIMIT = 1000;
       const shown = sortLedgerRows(rows, true).slice(0, LIMIT);
+      const editRow = lv.editing ? (lv.rows || []).find(r => ledgerRowKey(r) === lv.editing) : null;
+      if (editRow) html += renderLedgerEditCard(editRow);
       html += `<div class="lg-table"><table>
-        <thead><tr><th>체크일</th>${multi ? `<th>원</th>` : ``}<th>요일</th><th>구분</th><th>이름</th><th>나이</th><th>교사</th><th class="num">금액</th><th>결제방법</th><th>메모</th></tr></thead>
-        <tbody>${shown.map(r => `<tr>
+        <thead><tr><th>체크일</th>${multi ? `<th>원</th>` : ``}<th>요일</th><th>구분</th><th>이름</th><th>나이</th><th>교사</th><th class="num">금액</th><th>결제방법</th><th>메모</th><th></th></tr></thead>
+        <tbody>${shown.map(r => {
+          const st = ledgerStatus(r);
+          const amtChanged = ledgerAdjusted(r.adjAmount) && Number(r.adjAmount) !== (Number(r.amount) || 0);
+          const methodChanged = r.adjMethod && r.adjMethod !== (r.method || "카드");
+          return `<tr class="${ledgerRowKey(r) === lv.editing ? "lg-row-editing" : ""}">
           <td class="mono">${escapeHtml(r.paidDate)}</td>${multi ? `<td>${escapeHtml(r.center)}</td>` : ``}
-          <td>${escapeHtml(r.day)}</td><td>${escapeHtml(ledgerKindLabel(r))}</td><td><b>${escapeHtml(r.name)}</b></td>
-          <td>${escapeHtml(r.age)}</td><td>${escapeHtml(r.teacher)}</td><td class="num">${won(r.amount)}</td>
-          <td>${escapeHtml(r.method)}</td><td class="memo">${escapeHtml(r.memo)}</td>
-        </tr>`).join("")}</tbody></table></div>`;
+          <td>${escapeHtml(r.day)}</td><td>${escapeHtml(ledgerKindLabel(r))}</td>
+          <td><b>${escapeHtml(r.name)}</b>${st ? `<span class="lg-badge ${st.includes("취소") ? "cancel" : ""}">${escapeHtml(st)}</span>` : ``}</td>
+          <td>${escapeHtml(r.age)}</td><td>${escapeHtml(r.teacher)}</td>
+          <td class="num">${amtChanged ? `<span class="lg-orig">${won(r.amount)}</span>` : ``}${won(ledgerAmount(r))}</td>
+          <td>${escapeHtml(ledgerMethod(r))}${methodChanged ? `<span class="lg-orig">${escapeHtml(r.method)}</span>` : ``}</td>
+          <td class="memo">${escapeHtml(r.memo)}${r.note ? `<span class="lg-note">📝 ${escapeHtml(r.note)}</span>` : ``}</td>
+          <td><button class="lg-edit-btn" data-lgedit="${escapeHtml(ledgerRowKey(r))}">✎ 수정</button></td>
+        </tr>`; }).join("")}</tbody></table></div>`;
       if (rows.length > LIMIT) html += `<div class="sms-hint">화면에는 최근 ${LIMIT.toLocaleString()}건만 보여요. 엑셀로 저장하면 ${rows.length.toLocaleString()}건 전체가 들어가요.</div>`;
     } else {
       const showCenter = split && lv.group !== "center";
@@ -1598,6 +1655,126 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         </tbody></table></div>`;
     }
     el.innerHTML = html;
+    attachLedgerEditEvents();
+  }
+
+  function ledgerRowKey(r) { return `${r.center}::${r.id}`; }
+  function ledgerDateTime(ms) {
+    if (!ms) return "";
+    const d = new Date(ms);
+    return `${fmt(d)} ${d.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })}`;
+  }
+
+  function renderLedgerEditCard(r) {
+    const lv = state.ledgerView;
+    const won = (n) => `${(Number(n) || 0).toLocaleString()}원`;
+    const d = lv.editDraft && lv.editDraft.key === ledgerRowKey(r) ? lv.editDraft : null;
+    const status = d ? d.status : (r.status || "정상");
+    const amount = d ? d.amount : ledgerAmount(r).toLocaleString();
+    const method = d ? d.method : ledgerMethod(r);
+    const note = d ? d.note : (r.note || "");
+    const history = Array.isArray(r.history) ? r.history.slice().reverse() : [];
+    return `<div class="lg-edit-card" id="lgEditCard">
+      <div class="lg-edit-head">
+        <b>${escapeHtml(r.name)}</b>
+        <span class="lg-sub">${escapeHtml(r.paidDate)} · ${escapeHtml(r.center)} · ${escapeHtml(ledgerKindLabel(r))} · 원래 ${won(r.amount)} ${escapeHtml(r.method || "카드")}</span>
+      </div>
+      <div class="lg-row">
+        <label class="lg-field">상태
+          <select id="lgEdStatus" class="sms-input">${LEDGER_STATUS_OPTIONS.map(x => `<option value="${x}" ${status === x ? "selected" : ""}>${x}</option>`).join("")}</select>
+        </label>
+        <label class="lg-field">최종 금액
+          <input id="lgEdAmount" class="sms-input" inputmode="numeric" value="${escapeHtml(amount)}" style="width:120px;" /> 원
+        </label>
+        <label class="lg-field">결제방법
+          <select id="lgEdMethod" class="sms-input">${PAY_METHODS.map(m => `<option value="${m}" ${method === m ? "selected" : ""}>${m}</option>`).join("")}</select>
+        </label>
+      </div>
+      <textarea id="lgEdNote" placeholder="예: 11/20 카드 부분 취소 10만원 (보강 1회 환불)">${escapeHtml(note)}</textarea>
+      <div class="lg-row">
+        <button class="btn primary" id="lgEdSave">저장</button>
+        <button class="btn ghost" id="lgEdClose">닫기</button>
+        <span class="lg-sub" id="lgEdMsg" role="status">금액은 34처럼 만원 단위로 써도 돼요. 고친 금액과 결제방법이 합계와 엑셀에 들어가요.</span>
+      </div>
+      ${history.length ? `<div class="lg-history"><b>수정 기록</b>${history.map(h => `<div>${escapeHtml(ledgerDateTime(h.at))} · ${escapeHtml(h.by || "")} · ${escapeHtml((h.changes || []).join(", "))}</div>`).join("")}</div>` : ``}
+    </div>`;
+  }
+
+  function attachLedgerEditEvents() {
+    const lv = state.ledgerView;
+    document.querySelectorAll("#lgResults [data-lgedit]").forEach(b => b.addEventListener("click", () => {
+      lv.editing = b.dataset.lgedit;
+      lv.editDraft = null;
+      renderLedgerResults();
+      const card = document.getElementById("lgEditCard");
+      if (card && card.scrollIntoView) card.scrollIntoView({ block: "nearest" });
+    }));
+    const card = document.getElementById("lgEditCard");
+    if (!card) return;
+    const row = (lv.rows || []).find(r => ledgerRowKey(r) === lv.editing);
+    if (!row) return;
+    const statusSel = document.getElementById("lgEdStatus");
+    const amountInput = document.getElementById("lgEdAmount");
+    const methodSel = document.getElementById("lgEdMethod");
+    statusSel.addEventListener("change", () => {
+      if (statusSel.value === "전액 취소") amountInput.value = "0";
+      if (statusSel.value === "정상") { amountInput.value = (Number(row.amount) || 0).toLocaleString(); methodSel.value = row.method || "카드"; }
+      if (statusSel.value === "부분 취소" || statusSel.value === "금액 정정") { amountInput.focus(); amountInput.select(); }
+      if (statusSel.value === "결제방법 변경") methodSel.focus();
+    });
+    document.getElementById("lgEdClose").addEventListener("click", () => {
+      lv.editing = null;
+      lv.editDraft = null;
+      renderLedgerResults();
+    });
+    document.getElementById("lgEdSave").addEventListener("click", () => saveLedgerEdit(row));
+  }
+
+  async function saveLedgerEdit(r) {
+    const lv = state.ledgerView;
+    const won = (n) => `${(Number(n) || 0).toLocaleString()}원`;
+    const msg = document.getElementById("lgEdMsg");
+    const saveBtn = document.getElementById("lgEdSave");
+    const status = document.getElementById("lgEdStatus").value;
+    const amountText = document.getElementById("lgEdAmount").value.trim();
+    const amount = amountText === "" ? (Number(r.amount) || 0) : parseWonInput(amountText);
+    const method = document.getElementById("lgEdMethod").value;
+    const note = document.getElementById("lgEdNote").value.trim();
+    const before = { status: r.status || "정상", amount: ledgerAmount(r), method: ledgerMethod(r), note: r.note || "" };
+    const changes = [];
+    if (before.status !== status) changes.push(`상태 ${before.status} → ${status}`);
+    if (before.amount !== amount) changes.push(`금액 ${won(before.amount)} → ${won(amount)}`);
+    if (before.method !== method) changes.push(`결제방법 ${before.method} → ${method}`);
+    if (before.note !== note) changes.push(note ? (before.note ? "메모 수정" : "메모 추가") : "메모 삭제");
+    if (!changes.length) {
+      lv.editing = null;
+      lv.editDraft = null;
+      renderLedgerResults();
+      return;
+    }
+    const by = (fbAuth.currentUser && fbAuth.currentUser.email) || "";
+    const now = Date.now();
+    const patch = {
+      status: status === "정상" ? null : status,
+      adjAmount: amount === (Number(r.amount) || 0) ? null : amount,
+      adjMethod: method === (r.method || "카드") ? null : method,
+      note,
+      history: (Array.isArray(r.history) ? r.history : []).concat([{ at: now, by, changes }]),
+      editedAt: now, editedBy: by,
+    };
+    saveBtn.disabled = true;
+    if (msg) msg.textContent = "저장하는 중…";
+    try {
+      await centerLedgerRef(r.center).doc(r.id).set(patch, { merge: true });
+      Object.assign(r, patch);
+      lv.editing = null;
+      lv.editDraft = null;
+      renderLedgerResults();
+      showToast(`✅ ${r.name} 기록을 고쳤어요 (${changes.join(", ")})`);
+    } catch (e) {
+      saveBtn.disabled = false;
+      if (msg) msg.textContent = "저장하지 못했어요. " + ledgerErrorText(e);
+    }
   }
 
   function exportLedgerXlsx() {
@@ -1615,11 +1792,14 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       XLSX.utils.book_append_sheet(wb, ws, name);
     };
 
+    // 금액·결제방법은 장부에서 고친 값(없으면 원래 값). 원래 값과 상태·장부 메모·수정 기록도 함께
     addSheet("매출기록",
-      [["체크일", "원", "주차", "요일", "구분", "이름", "나이", "교사", "수업시간", "금액", "결제방법", "메모", "다음텀"]].concat(
-        rows.map(r => [r.paidDate, r.center, ledgerWeekLabel(r.week), r.day, ledgerKindLabel(r), r.name, r.age, r.teacher, r.time, Number(r.amount) || 0, r.method, r.memo, r.nextTerm]))
-        .concat([["합계", "", "", "", "", `${rows.length}건`, "", "", "", sumLedger(rows).total, "", "", ""]]),
-      [11, 11, 24, 7, 12, 10, 6, 10, 10, 11, 9, 30, 13]);
+      [["체크일", "원", "주차", "요일", "구분", "이름", "나이", "교사", "수업시간", "금액", "결제방법", "상태", "원래 금액", "원래 결제방법", "장부 메모", "메모", "다음텀", "수정 기록"]].concat(
+        rows.map(r => [r.paidDate, r.center, ledgerWeekLabel(r.week), r.day, ledgerKindLabel(r), r.name, r.age, r.teacher, r.time,
+          ledgerAmount(r), ledgerMethod(r), r.status || "정상", Number(r.amount) || 0, r.method || "카드", r.note || "", r.memo, r.nextTerm,
+          (Array.isArray(r.history) ? r.history : []).map(h => `${ledgerDateTime(h.at)} ${h.by || ""}: ${(h.changes || []).join(", ")}`).join(" / ")]))
+        .concat([["합계", "", "", "", "", `${rows.length}건`, "", "", "", sumLedger(rows).total, "", "", "", "", "", "", "", ""]]),
+      [11, 11, 24, 7, 12, 10, 6, 10, 10, 11, 9, 10, 11, 11, 30, 30, 13, 40]);
 
     const groupSheet = (group, title) => {
       const showCenter = split && group !== "center";
@@ -1643,11 +1823,12 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       ["기간", `${lv.from} ~ ${lv.to}`],
       ["결제방법", lv.method || "전체"],
       ["구분", lv.kind ? ((ledgerKindFilter(lv.kind) || {}).label || lv.kind) : "전체"],
+      ["상태", lv.status === "edited" ? "메모·수정한 기록만" : (lv.status || "전체")],
       ["검색", lv.q || "-"],
       ["건수", rows.length],
       ["합계", sumLedger(rows).total],
       ["저장 시각", `${fmt(now)} ${now.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })}`],
-      ["참고", "신규생 결제도 장부에 포함돼요. 매출 요약 합계와 매출 기록 내보내기(CSV)에는 들어가지 않아요."],
+      ["참고", "신규생 결제도 장부에 포함돼요. 매출 요약 합계와 매출 기록 내보내기(CSV)에는 들어가지 않아요. 금액·결제방법은 장부에서 고친 값이 들어가요."],
     ], [10, 40]);
 
     const who = multi ? "전체" : centers[0];
