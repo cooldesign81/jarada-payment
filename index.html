@@ -2664,7 +2664,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
           <button class="btn" id="smsSelectAllBtn">전체 선택</button>
           <button class="btn ghost" id="smsSelectNoneBtn">전체 해제</button>
         </div>
-        <div class="sms-recipient-list">
+        <div class="sms-recipient-list" data-keep-scroll="sms-${escapeHtml(state.activeDay || "")}">
     `;
     list.forEach(s => {
       const checked = !!state.smsSelected[s.id];
@@ -3088,7 +3088,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       }
     }
 
-    app.innerHTML = html;
+    keepScrollWhile(app, () => { app.innerHTML = html; });
     attachEvents();
   }
 
@@ -3897,6 +3897,32 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     });
   }
 
+  // 체크박스를 누를 때마다 창을 새로 그리면 받는 사람 목록이 맨 위로 튀어 오르던 문제 방지:
+  // data-keep-scroll 이 붙은 목록과 창 자체의 스크롤 위치, 누르던 체크박스 포커스를 기억했다가 그린 뒤 되돌림
+  function keepScrollWhile(root, draw) {
+    if (!root) { draw(); return; }
+    const lists = {};
+    root.querySelectorAll("[data-keep-scroll]").forEach(el => { lists[el.dataset.keepScroll] = el.scrollTop; });
+    const rootTop = root.scrollTop;
+    const pageY = window.scrollY;
+    const active = document.activeElement;
+    const focusSel = active && root.contains(active)
+      ? (active.dataset.autosmsid ? `[data-autosmsid="${CSS.escape(active.dataset.autosmsid)}"]`
+        : active.dataset.smsid ? `[data-smsid="${CSS.escape(active.dataset.smsid)}"]` : null)
+      : null;
+    draw();
+    root.querySelectorAll("[data-keep-scroll]").forEach(el => {
+      const top = lists[el.dataset.keepScroll];
+      if (top !== undefined) el.scrollTop = top;
+    });
+    root.scrollTop = rootTop;
+    if (window.scrollY !== pageY) window.scrollTo(window.scrollX, pageY);
+    if (focusSel) {
+      const again = root.querySelector(focusSel);
+      if (again) again.focus({ preventScroll: true });
+    }
+  }
+
   function renderAutoSmsBox() {
     const box = document.getElementById("autoSmsBox");
     if (!box) return;
@@ -3944,7 +3970,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
           <button class="btn" id="autoSmsSelectAllBtn">전체 선택</button>
           <button class="btn ghost" id="autoSmsSelectNoneBtn">전체 해제</button>
         </div>
-        <div class="sms-recipient-list" style="max-height: 260px;">
+        <div class="sms-recipient-list" data-keep-scroll="auto-sms" style="max-height: 260px;">
     `;
     list.forEach(s => {
       const checked = !!state.autoSmsSelected[s.id];
@@ -3988,7 +4014,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       </div>
       <div class="sms-hint">알리고 API는 브라우저 직접 호출 시 응답 확인이 안 될 수 있어요. 실제 발송 여부는 알리고 관리자 페이지에서 확인해 주세요.</div>
     `;
-    box.innerHTML = html;
+    keepScrollWhile(box, () => { box.innerHTML = html; });
     attachAutoSmsEvents();
   }
 
