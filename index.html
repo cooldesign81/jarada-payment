@@ -163,6 +163,8 @@
     background-repeat: no-repeat; background-position: right 6px center; background-size: 9px 6px;
   }
   .pay-select.unpaid-hide { color: transparent; background-image: none; }
+  /* 결제 전에는 닫힌 칸 글씨를 숨기지만(투명), 펼친 목록 항목까지 투명해지지 않게 진한 글씨로 */
+  .pay-select option { color: var(--ink); background: var(--surface); }
   .pay-select-capture {
     display: inline-flex; align-items: center; justify-content: flex-start;
   }
