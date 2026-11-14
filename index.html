@@ -505,6 +505,7 @@
   <div id="jpHeader"></div>
   <div class="shell" id="app"></div>
   <script src="https://cooldesign81.github.io/jarada-jpone/shared/jp-header.js?v=1"></script>
+  <script src="https://cooldesign81.github.io/jarada-jpone/shared/jp-login.js?v=1"></script>
 
   <div id="captureModal">
     <div class="capture-box">
@@ -4160,8 +4161,22 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   render();
 
   // ── 로그인 / 소속 원 선택 흐름 ────────────────────────────────
-  function showAuthScreen() { document.getElementById("authScreen").classList.add("open"); }
-  function hideAuthScreen() { document.getElementById("authScreen").classList.remove("open"); }
+  // 로그인 화면: JP ONE 공통 부품(shared/jp-login.js, 좌우 나눔). 못 불러오면 예전 화면(#authScreen)
+  let payDenied = null;   // 명단에 없는 구글 계정 {email, msg} — 로그아웃되면서 로그인 화면에 보여 줌
+  function showAuthScreen() {
+    if (window.JPLogin) {
+      const d = payDenied; payDenied = null;
+      if (JPLogin.open && !d) return;
+      const pick = new firebase.auth.GoogleAuthProvider(); pick.setCustomParameters({ prompt: "select_account" });
+      JPLogin.show({ app: "payment", lead: "JP ONE 직원 계정(관리자)으로 들어와요",
+        google: () => fbAuth.signInWithPopup(new firebase.auth.GoogleAuthProvider()),
+        common: (em, pw) => fbAuth.signInWithEmailAndPassword(em, pw), commonLabel: "원 공용 계정",
+        denied: d, onSwitch: () => fbAuth.signInWithPopup(pick) });
+      return;
+    }
+    document.getElementById("authScreen").classList.add("open");
+  }
+  function hideAuthScreen() { window.JPLogin?.hide(); document.getElementById("authScreen").classList.remove("open"); }
   function showCenterScreen() { document.getElementById("centerScreen").classList.add("open"); }
   function hideCenterScreen() { document.getElementById("centerScreen").classList.remove("open"); }
 
@@ -4328,7 +4343,9 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         state.payCenters = acc.exists ? (acc.data().centers || []).filter(c => CENTER_LIST.includes(c)) : [];
       } catch (e) { state.payCenters = []; }
       if (!state.payCenters.length) {
+        payDenied = { email: user.email, msg: "결제 매니저 명단에 없어요. JP ONE 관리자에게 등록을 요청하거나 원 공용 계정으로 로그인해 주세요." };
         await fbAuth.signOut();
+        if (payDenied) showAuthScreen();
         document.getElementById("authError").textContent = `${user.email} 계정은 결제 매니저 명단에 없어요. JP ONE 관리자에게 등록을 요청하거나 원 공용 계정으로 로그인해 주세요.`;
         return;
       }
