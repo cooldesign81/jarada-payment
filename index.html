@@ -29,7 +29,9 @@
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--sans); }
-  body { padding: 28px 20px 60px; }
+  body { padding: 0 0 60px; }
+  .shell { padding: 0 20px; }
+  .header .jp-tool { padding: 16px 0 0; margin-top: 0; }
   .shell { max-width: 980px; margin: 0 auto; }
 
   .header { margin-bottom: 22px; }
@@ -500,7 +502,9 @@
 </style>
 </head>
 <body>
+  <div id="jpHeader"></div>
   <div class="shell" id="app"></div>
+  <script src="https://cooldesign81.github.io/jarada-jpone/shared/jp-header.js?v=1"></script>
 
   <div id="captureModal">
     <div class="capture-box">
@@ -2947,6 +2951,37 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     return "";
   }
 
+  // 공통 상단(JP ONE shared/jp-header.js): 로그인한 계정 · 원 선택(대표, 여러 원 관리자) · 로그아웃
+  let jpHd = null;
+  function syncHeader() {
+    if (!window.JPHeader) return;
+    if (!jpHd) jpHd = JPHeader.mount("#jpHeader", { app: "payment" });
+    const u = fbAuth.currentUser;
+    const isG = !!u && (u.providerData || []).some(p => p.providerId === "google.com");
+    const list = state.isAdmin ? CENTER_LIST : (state.payCenters && state.payCenters.length > 1 ? state.payCenters : []);
+    jpHd.update({
+      user: fbCenter ? (isG ? (u.email || "") : `${fbCenter} 계정`) : "",
+      sub: fbCenter && !list.length ? fbCenter : "",
+      admin: state.isAdmin,
+      branches: fbCenter ? list.map(c => ({ value: c, label: c })) : [],
+      branch: fbCenter || "",
+      onBranch: switchCenter,
+      onLogout: fbCenter ? () => { if (window.confirm("로그아웃 하시겠어요?")) fbAuth.signOut(); } : null
+    });
+  }
+  // 원 바꾸기 (대표: 세 원, 구글 로그인 관리자: 명단에 있는 원)
+  async function switchCenter(newCenter) {
+    if (newCenter === fbCenter) return;
+    if (state.payCenters && !state.payCenters.includes(newCenter)) return;
+    if (ledgerSyncTimer) syncLedger(); // 기다리던 장부 저장은 바꾸기 전 원으로 먼저 보냄
+    fbCenter = newCenter;
+    if (state.payCenters) { try { await userCenterRef(fbAuth.currentUser.uid).set({ center: newCenter, email: fbAuth.currentUser.email || "" }); } catch (e) {} }
+    loadWeekFromStorage();
+    state.message = "";
+    startFirestoreSync();
+    render();
+  }
+
   function render() {
     const app = document.getElementById("app");
     const { nextMonday, nextSaturday } = nextWeekRange(state.refDate);
@@ -2954,22 +2989,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
 
     let html = `
       <div class="header">
-        <div class="eyebrow">
-          <span></span>
-          ${fbCenter ? `<span class="eyebrow-right">
-            <span class="acct-text">${escapeHtml(fbCenter)} 계정</span>
-            ${state.isAdmin ? `<select id="adminCenterSwitch" class="center-switch">
-              <option value="안양평촌원" ${fbCenter === "안양평촌원" ? "selected" : ""}>안양평촌원</option>
-              <option value="서초반포원" ${fbCenter === "서초반포원" ? "selected" : ""}>서초반포원</option>
-              <option value="강남대치원" ${fbCenter === "강남대치원" ? "selected" : ""}>강남대치원</option>
-            </select>` : ``}
-            <span class="logout-link" id="logoutBtn">로그아웃</span>
-          </span>` : ``}
-        </div>
-        <div class="title-bar">
-          <h1>자라다 JP 결제 매니저 <span class="by-line">by Jin</span></h1>
-        </div>
-        <div class="toolbar">
+        <div class="toolbar jp-tool">
           <input type="date" class="refdate" id="refDateInput" value="${fmt(state.refDate)}" title="기준일 (보통 오늘)" />
           <button class="btn" id="calendarOpenBtn">📅 학사달력</button>
           <button class="btn" id="ledgerOpenBtn">📒 매출 장부</button>
@@ -3109,24 +3129,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       }
     });
 
-    const logoutBtn = document.getElementById("logoutBtn");
-    if (logoutBtn) logoutBtn.addEventListener("click", () => {
-      if (window.confirm("로그아웃 하시겠어요?")) {
-        fbAuth.signOut();
-      }
-    });
-
-    const adminCenterSwitch = document.getElementById("adminCenterSwitch");
-    if (adminCenterSwitch) adminCenterSwitch.addEventListener("change", () => {
-      const newCenter = adminCenterSwitch.value;
-      if (newCenter === fbCenter) return;
-      if (ledgerSyncTimer) syncLedger(); // 기다리던 장부 저장은 바꾸기 전 원으로 먼저 보냄
-      fbCenter = newCenter;
-      loadWeekFromStorage();
-      state.message = "";
-      startFirestoreSync();
-      render();
-    });
+    syncHeader();
 
     const calendarOpenBtn = document.getElementById("calendarOpenBtn");
     if (calendarOpenBtn) calendarOpenBtn.addEventListener("click", () => {
