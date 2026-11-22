@@ -1047,6 +1047,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   state.autoReminders = {};        // 이번 주 자동 예약 문자 (smsQueue 문서 id -> 내용)
   state.autoRemindersLoaded = false;
   state.autoReminderError = "";
+  state.autoReminderServer = null;   // 서버(매일 오전 9시) 마지막 실행 결과
   state.autoSmsTime = loadAutoReserveTime();
   state.autoSmsCustomDate = "";
 
@@ -2800,9 +2801,26 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     if (st.noPhone) parts.push(`연락처 없음 ${st.noPhone}명`);
     return `자동 예약 켜짐${ar.testMode ? " (테스트 모드)" : ""} · 수업 전날 ${autoReminderTime()} · ${parts.join(" · ")}${state.autoReminderError ? ` · ⚠ ${state.autoReminderError}` : ""}`;
   }
+  // 서버(Google Cloud payment-reminder, 매일 오전 9시)가 남긴 마지막 실행 결과
+  function autoReminderServerText() {
+    const sv = state.autoReminderServer;
+    if (!sv || !sv.lastRunAt) return "서버 자동 예약: 아직 실행 기록이 없어요. 서버를 설치하기 전에는 이 화면을 연 때에만 예약돼요.";
+    const d = new Date(sv.lastRunAt);
+    const when = `${fmtShort(d)} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    const target = sv.classDate ? `${fmtShort(sv.classDate)}${sv.day ? `(${sv.day})` : ""} 수업` : "다음 날 수업";
+    if (sv.error) return `서버 자동 예약: ${when} 실행 중 오류 · ${sv.error}`;
+    if (sv.note) return `서버 자동 예약: ${when} 실행 · ${target} · ${sv.note}`;
+    const parts = [`새로 예약 ${sv.created || 0}명`];
+    if (sv.alreadyScheduled) parts.push(`이미 예약 ${sv.alreadyScheduled}명`);
+    if (sv.paid) parts.push(`결제해서 제외 ${sv.paid}명`);
+    if (sv.noPhone) parts.push(`연락처 없음 ${sv.noPhone}명`);
+    return `서버 자동 예약: ${when} 실행 · ${target} · ${parts.join(" · ")}`;
+  }
   function renderAutoReminderStatus() {
     const el = document.getElementById("arStatus");
     if (el) el.textContent = autoReminderStatusText();
+    const sv = document.getElementById("arServerStatus");
+    if (sv) sv.textContent = autoReminderServerText();
   }
 
   function updateEntry(id, patch) {
@@ -3930,7 +3948,8 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
           <button class="btn primary" id="arSaveBtn">저장</button>
         </div>
         <div class="sms-hint" id="arStatus" style="font-weight: 700;">${escapeHtml(autoReminderStatusText())}</div>
-        <div class="sms-hint">켜 두면 이 원 계정으로 누군가 결제 매니저를 열 때마다, 이번 주 결제 대상 중 결제 안 한 학생을 수업 전날 정한 시각으로 문자 대기열에 예약해요. 학생마다 한 번만 예약돼요. 결제를 체크하면 그 학생 예약은 바로 취소되고, 체크를 풀면 시간이 남아 있을 때 다시 예약돼요. 원비를 고치면 아직 안 보낸 문자에도 반영돼요. 예약된 문자는 '문자 대기열'에서 확인하고 직접 취소할 수 있어요. 끄면 이번 주 아직 안 보낸 자동 예약은 모두 취소돼요. 보낼 시각이 이미 지났거나(월요일 수업은 전날이 지난주라 해당) 연락처가 없는 학생은 예약하지 않아요.</div>
+        <div class="sms-hint" id="arServerStatus">${escapeHtml(autoReminderServerText())}</div>
+        <div class="sms-hint">켜 두면 이 원 계정으로 누군가 결제 매니저를 열 때마다, 이번 주 결제 대상 중 결제 안 한 학생을 수업 전날 정한 시각으로 문자 대기열에 예약해요. 학생마다 한 번만 예약돼요. 결제를 체크하면 그 학생 예약은 바로 취소되고, 체크를 풀면 시간이 남아 있을 때 다시 예약돼요. 원비를 고치면 아직 안 보낸 문자에도 반영돼요. 예약된 문자는 '문자 대기열'에서 확인하고 직접 취소할 수 있어요. 끄면 이번 주 아직 안 보낸 자동 예약은 모두 취소돼요. 보낼 시각이 이미 지났거나 연락처가 없는 학생은 예약하지 않아요. 서버 자동 예약을 설치하면 매일 오전 9시에 서버가 다음 날 수업 학생을 예약해서, 아무도 이 화면을 열지 않는 날(예: 월요일 저녁에 보내는 화요일 수업 문자)에도 빠지지 않아요. 보내는 시각은 오전 9시 이후로 정해 주세요.</div>
       </div>
 
       <div class="sms-section" style="border-top: 1px solid var(--line); padding-top: 14px;">
@@ -4666,6 +4685,8 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       if (data.calendar) state.calendar = data.calendar;
       if (data.smsSettings) state.smsSettings = data.smsSettings;
       state.autoReminder = { ...DEFAULT_AUTO_REMINDER, ...(data.autoReminder || {}) };
+      state.autoReminderServer = data.autoReminderServer || null;
+      renderAutoReminderStatus();
       // 학사달력(공휴일/방학)이 바뀌면 '경과' 등 계산이 달라지므로 명단을 다시 계산해줌
       if (state.rawRosterRows && state.rawRosterRows.length) {
         const { nextSaturday } = nextWeekRange(state.refDate);
