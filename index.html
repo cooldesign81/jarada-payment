@@ -1041,6 +1041,11 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     try { return localStorage.getItem(AUTO_RESERVE_TIME_KEY) || "19:00"; } catch (e) { return "19:00"; }
   }
   state.autoSmsDayOffset = loadAutoReserveOffset(); // "before" = 하루전, "same" = 당일, "custom" = 날짜 직접 지정
+  // 결제 안내 자동 예약 설정 (원별, Firestore 설정 문서 autoReminder). 처음엔 꺼져 있음
+  const DEFAULT_AUTO_REMINDER = { enabled: false, time: "19:00", title: "", template: "", testMode: false };
+  state.autoReminder = { ...DEFAULT_AUTO_REMINDER };
+  state.autoReminders = {};        // 이번 주 자동 예약 문자 (smsQueue 문서 id -> 내용)
+  state.autoRemindersLoaded = false;
   state.autoSmsTime = loadAutoReserveTime();
   state.autoSmsCustomDate = "";
 
@@ -2588,12 +2593,219 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   // 체크 초기화·되돌리기·백업 불러오기처럼 한꺼번에 바뀐 뒤 이번 주 학생 전체를 다시 맞춤
   function syncCashReceiptsForWeek() {
     getAllStudentsList().forEach(s => rememberCashReceipt(s.id));
+    getAllStudentsList().forEach(s => syncAutoReminderFor(s.id));
+  }
+
+  // ---- 결제 안내 자동 예약 (smsQueue 문서 id "auto|원|주차|학생") ----
+  // 이 원 계정으로 결제 매니저를 연 누군가의 화면이, 이번 주 결제 대상 중 결제 안 한 학생을 수업 전날 설정 시각
+  // (기본 19:00)으로 발송 대기열에 넣음. 학생마다 한 번만 (트랜잭션이라 여러 화면이 동시에 열어도 겹치지 않음).
+  // 결제를 체크하면 그 예약을 바로 취소하고, 체크를 풀면 시간이 남았을 때 다시 대기로 돌림.
+  // 실제 발송은 지금처럼 서버가 대기열(status: pending, scheduleAt)을 보고 처리 — 취소된 문자는 보내지 않음.
+  // 직원이 '문자 대기열'에서 직접 취소한 문자는 다시 살리지 않음 (cancelReason 이 paid·off 인 것만 되살림)
+  let unsubAutoReminders = null;
+  let autoReminderTimer = null;
+  let autoReminderRunning = false;
+  function autoReminderKey(center, wk) { return `${center}|${wk}`; }
+  function autoReminderId(center, wk, sid) { return `auto|${center}|${wk}|${sid}`.replace(/\//g, "／"); }
+  function autoReminderTime() {
+    const t = String(state.autoReminder.time || "");
+    return /^\d{2}:\d{2}$/.test(t) ? t : "19:00";
+  }
+  // 수업 전날 설정 시각 (한국 시간)
+  function autoReminderSendAt(s) {
+    const offset = DAY_OFFSET[s.day];
+    if (offset === undefined) return null;
+    const { nextMonday } = nextWeekRange(state.refDate);
+    const sendDate = addDays(addDays(nextMonday, offset), -1);
+    return new Date(`${fmt(sendDate)}T${autoReminderTime()}:00+09:00`);
+  }
+  function autoReminderContent(s) {
+    const ar = state.autoReminder;
+    const message = fillTemplate(ar.template || DEFAULT_AUTO_TEMPLATE, s);
+    const subject = (fillTemplate(ar.title || DEFAULT_SMS_TITLE, s) || "결제 안내").trim().slice(0, 40);
+    return { message, subject };
+  }
+  function smsAccountReady() {
+    const t = state.smsSettings || {};
+    return !!(t.apiKey && t.userId && t.senderNumber);
+  }
+  function myEmail() { return (fbAuth.currentUser && fbAuth.currentUser.email) || ""; }
+
+  function subscribeAutoReminders(wk) {
+    stopAutoReminders();
+    if (!fbCenter) return;
+    const center = fbCenter;
+    unsubAutoReminders = smsQueueRef().where("center", "==", center).where("autoKey", "==", autoReminderKey(center, wk)).onSnapshot(snap => {
+      if (fbCenter !== center || weekKey() !== wk) return;
+      const m = {};
+      snap.forEach(d => { m[d.id] = d.data(); });
+      state.autoReminders = m;
+      state.autoRemindersLoaded = true;
+      renderAutoReminderStatus();
+      scheduleAutoReminders();
+    }, () => {});
+  }
+  function stopAutoReminders() {
+    if (unsubAutoReminders) { unsubAutoReminders(); unsubAutoReminders = null; }
+    clearTimeout(autoReminderTimer);
+    autoReminderTimer = null;
+    state.autoReminders = {};
+    state.autoRemindersLoaded = false;
+  }
+
+  // 대기열 문서의 상태를 바꿀 때는 서버가 이미 보냈거나 직원이 취소한 문서를 건드리지 않도록 트랜잭션으로 확인
+  function updateAutoReminderIf(ref, check, patch) {
+    return fbDb.runTransaction(async tx => {
+      const snap = await tx.get(ref);
+      if (!snap.exists || !check(snap.data())) return false;
+      tx.update(ref, patch);
+      return true;
+    });
+  }
+
+  function scheduleAutoReminders(delay = 1500) {
+    clearTimeout(autoReminderTimer);
+    autoReminderTimer = setTimeout(() => { autoReminderTimer = null; runAutoReminders(); }, delay);
+  }
+
+  async function runAutoReminders() {
+    const ar = state.autoReminder;
+    const wk = weekKey();
+    const center = fbCenter;
+    // 실제 이번 주를 보고 있고, 체크 기록을 서버에서 받았고, 예약 목록·명단·문자 계정이 준비됐을 때만
+    if (!center || !ar.enabled || !isRealCurrentWeek() || weekFromServerKey !== wk || !state.autoRemindersLoaded || !state.students || !smsAccountReady()) return;
+    if (autoReminderRunning) { scheduleAutoReminders(); return; }
+    autoReminderRunning = true;
+    try {
+      for (const s of getAllStudentsList()) {
+        if (fbCenter !== center || weekKey() !== wk || !state.autoReminder.enabled) break;
+        const c = state.checklist[s.id] || {};
+        const id = autoReminderId(center, wk, s.id);
+        const ref = smsQueueRef().doc(id);
+        const existing = state.autoReminders[id];
+        if (c.paid) {
+          // 다른 화면에서 결제 체크했는데 취소가 안 됐던 예약도 여기서 정리
+          if (existing && existing.status === "pending") {
+            try {
+              await updateAutoReminderIf(ref, d => d.status === "pending",
+                { status: "cancelled", cancelReason: "paid", cancelledAt: Date.now(), cancelledBy: myEmail() });
+            } catch (e) {}
+          }
+          continue;
+        }
+        const phone = String(s.phone || "").replace(/[^0-9]/g, "");
+        const at = autoReminderSendAt(s);
+        if (!phone || !at || at.getTime() <= Date.now() + 60 * 1000) continue;
+        const { message, subject } = autoReminderContent(s);
+        const recipients = [{ phone, name: s.name, message, subject }];
+        try {
+          if (!existing) {
+            const data = {
+              center, status: "pending", testMode: !!ar.testMode, scheduleAt: at.toISOString(),
+              createdAt: Date.now(), createdBy: myEmail(), recipients,
+              auto: true, autoKey: autoReminderKey(center, wk), week: wk, studentId: s.id,
+            };
+            await fbDb.runTransaction(async tx => {
+              const snap = await tx.get(ref);
+              if (!snap.exists) tx.set(ref, data);
+            });
+          } else if (existing.status === "cancelled" && (existing.cancelReason === "paid" || existing.cancelReason === "off")) {
+            // 결제 체크를 풀었거나 자동 예약을 다시 켰을 때 되살림
+            await updateAutoReminderIf(ref, d => d.status === "cancelled" && (d.cancelReason === "paid" || d.cancelReason === "off"),
+              { status: "pending", cancelReason: null, scheduleAt: at.toISOString(), recipients, testMode: !!ar.testMode, updatedAt: Date.now(), updatedBy: myEmail() });
+          } else if (existing.status === "pending") {
+            // 원비·문자 내용·보내는 시각·테스트 모드가 바뀌었으면 아직 안 보낸 예약에 반영
+            const cur = (existing.recipients || [])[0] || {};
+            const changed = existing.scheduleAt !== at.toISOString() || cur.message !== message || cur.subject !== subject || cur.phone !== phone || !!existing.testMode !== !!ar.testMode;
+            const stillAhead = existing.scheduleAt && new Date(existing.scheduleAt).getTime() > Date.now() + 60 * 1000;
+            if (changed && stillAhead) {
+              await updateAutoReminderIf(ref, d => d.status === "pending",
+                { scheduleAt: at.toISOString(), recipients, testMode: !!ar.testMode, updatedAt: Date.now(), updatedBy: myEmail() });
+            }
+          }
+        } catch (e) {
+          // 권한·연결 문제는 다음에 화면이 바뀔 때 다시 시도
+        }
+      }
+    } finally {
+      autoReminderRunning = false;
+    }
+  }
+
+  // 결제를 체크하면 그 학생 예약을 바로 취소 (자동 예약을 꺼 둬도). 체크를 풀거나 원비를 고치면 다시 맞춤
+  function syncAutoReminderFor(sid) {
+    const center = fbCenter;
+    if (!center) return;
+    const c = state.checklist[sid] || {};
+    if (c.paid) {
+      const id = autoReminderId(center, weekKey(), sid);
+      // 예약 목록을 이미 받았고 이 학생 대기 예약이 없으면 확인할 필요 없음 (못 받았으면 안전하게 직접 확인)
+      if (state.autoRemindersLoaded && !(state.autoReminders[id] && state.autoReminders[id].status === "pending")) return;
+      const ref = smsQueueRef().doc(id);
+      updateAutoReminderIf(ref, d => d.status === "pending",
+        { status: "cancelled", cancelReason: "paid", cancelledAt: Date.now(), cancelledBy: myEmail() }).catch(() => {});
+      if (state.autoReminders[id] && state.autoReminders[id].status === "pending") {
+        state.autoReminders[id] = { ...state.autoReminders[id], status: "cancelled", cancelReason: "paid" };
+      }
+    } else {
+      scheduleAutoReminders(800);
+    }
+  }
+
+  // 자동 예약을 끄면 이번 주 아직 안 보낸 자동 예약을 모두 취소
+  async function cancelAllAutoReminders() {
+    const ids = Object.keys(state.autoReminders).filter(id => state.autoReminders[id].status === "pending");
+    for (const id of ids) {
+      try {
+        await updateAutoReminderIf(smsQueueRef().doc(id), d => d.status === "pending",
+          { status: "cancelled", cancelReason: "off", cancelledAt: Date.now(), cancelledBy: myEmail() });
+      } catch (e) {}
+    }
+    return ids.length;
+  }
+
+  function autoReminderStats() {
+    const wk = weekKey();
+    const stats = { pending: 0, paidCancelled: 0, sent: 0, missed: 0, noPhone: 0 };
+    Object.values(state.autoReminders).forEach(d => {
+      if (d.status === "pending") stats.pending++;
+      else if (d.status === "cancelled" && d.cancelReason === "paid") stats.paidCancelled++;
+      else if (d.status === "sent") stats.sent++;
+    });
+    if (fbCenter && state.students) {
+      getAllStudentsList().forEach(s => {
+        const c = state.checklist[s.id] || {};
+        if (c.paid || state.autoReminders[autoReminderId(fbCenter, wk, s.id)]) return;
+        if (!String(s.phone || "").replace(/[^0-9]/g, "")) { stats.noPhone++; return; }
+        const at = autoReminderSendAt(s);
+        if (!at || at.getTime() <= Date.now() + 60 * 1000) stats.missed++;
+      });
+    }
+    return stats;
+  }
+  function autoReminderStatusText() {
+    const ar = state.autoReminder;
+    if (!ar.enabled) return "자동 예약이 꺼져 있어요.";
+    if (!smsAccountReady()) return "문자 발송 설정(알리고 계정)이 비어 있어서 예약하지 못하고 있어요.";
+    if (!isRealCurrentWeek()) return "자동 예약은 이번 주 화면에서만 동작해요.";
+    const st = autoReminderStats();
+    const parts = [`이번 주 예약 ${st.pending}명`];
+    if (st.paidCancelled) parts.push(`결제해서 취소 ${st.paidCancelled}명`);
+    if (st.sent) parts.push(`발송 ${st.sent}명`);
+    if (st.missed) parts.push(`보낼 시각이 지나 예약 못 함 ${st.missed}명`);
+    if (st.noPhone) parts.push(`연락처 없음 ${st.noPhone}명`);
+    return `자동 예약 켜짐${ar.testMode ? " (테스트 모드)" : ""} · 수업 전날 ${autoReminderTime()} · ${parts.join(" · ")}`;
+  }
+  function renderAutoReminderStatus() {
+    const el = document.getElementById("arStatus");
+    if (el) el.textContent = autoReminderStatusText();
   }
 
   function updateEntry(id, patch) {
     state.checklist[id] = { ...(state.checklist[id] || {}), ...patch };
     saveChecklist();
     rememberCashReceipt(id);
+    syncAutoReminderFor(id);
     render();
   }
 
@@ -3701,6 +3913,23 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       </div>
 
       <div class="sms-section" style="border-top: 1px solid var(--line); padding-top: 14px;">
+        <div class="sms-section-title">결제 안내 자동 예약</div>
+        <div class="cal-add-row" style="flex-direction: column; align-items: stretch; gap: 10px;">
+          <label class="tuition-row"><input type="checkbox" id="arEnabled" ${state.autoReminder.enabled ? "checked" : ""} /> 결제 안 한 학생에게 수업 전날 자동으로 예약 문자 보내기</label>
+          <div class="cal-add-row" style="gap: 10px;">
+            <label class="tuition-row">보내는 시각 <input type="time" id="arTime" class="sms-input" value="${escapeHtml(autoReminderTime())}" /></label>
+            <label class="tuition-row"><input type="checkbox" id="arTest" ${state.autoReminder.testMode ? "checked" : ""} /> 테스트 모드 (실제 발송 안 되고 요청만 확인)</label>
+          </div>
+          <input id="arTitle" class="sms-input" placeholder="제목 (장문 발송 시 필수)" value="${escapeHtml(state.autoReminder.title || state.autoSmsTitle || DEFAULT_SMS_TITLE)}" />
+          <textarea id="arTemplate" class="sms-textarea" rows="8">${escapeHtml(state.autoReminder.template || state.autoSmsTemplate || DEFAULT_AUTO_TEMPLATE)}</textarea>
+          <div class="sms-hint">사용 가능한 값: {이름} {나이} {교사} {요일} {8회차토} {경과} {센터명} {다음텀} {다음텀시작} {다음텀종료} {지역원계좌정보} {원비금액}</div>
+          <button class="btn primary" id="arSaveBtn">저장</button>
+        </div>
+        <div class="sms-hint" id="arStatus" style="font-weight: 700;">${escapeHtml(autoReminderStatusText())}</div>
+        <div class="sms-hint">켜 두면 이 원 계정으로 누군가 결제 매니저를 열 때마다, 이번 주 결제 대상 중 결제 안 한 학생을 수업 전날 정한 시각으로 문자 대기열에 예약해요. 학생마다 한 번만 예약돼요. 결제를 체크하면 그 학생 예약은 바로 취소되고, 체크를 풀면 시간이 남아 있을 때 다시 예약돼요. 원비를 고치면 아직 안 보낸 문자에도 반영돼요. 예약된 문자는 '문자 대기열'에서 확인하고 직접 취소할 수 있어요. 끄면 이번 주 아직 안 보낸 자동 예약은 모두 취소돼요. 보낼 시각이 이미 지났거나(월요일 수업은 전날이 지난주라 해당) 연락처가 없는 학생은 예약하지 않아요.</div>
+      </div>
+
+      <div class="sms-section" style="border-top: 1px solid var(--line); padding-top: 14px;">
         <div class="sms-section-title">원 설정</div>
         <div class="tuition-grid">
           <label class="tuition-row">0. 학원명 <input id="tsName" type="text" class="sms-input" style="width:180px;" placeholder="예: 자라다 서초반포원" value="${escapeHtml(t.name)}" /></label>
@@ -3744,6 +3973,34 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       saveSmsSettings(state.smsSettings);
       showToast("✅ 문자 발송 설정을 저장했어요");
       renderSmsSettingsBox();
+    });
+    const arSaveBtn = document.getElementById("arSaveBtn");
+    if (arSaveBtn) arSaveBtn.addEventListener("click", async () => {
+      const wasOn = !!state.autoReminder.enabled;
+      const next = {
+        enabled: document.getElementById("arEnabled").checked,
+        time: document.getElementById("arTime").value || "19:00",
+        testMode: document.getElementById("arTest").checked,
+        title: document.getElementById("arTitle").value.trim(),
+        template: document.getElementById("arTemplate").value,
+      };
+      if (next.enabled && !smsAccountReady()) {
+        showToast("⚠️ 위의 문자 발송 설정(알리고 계정)을 먼저 저장해야 자동 예약을 켤 수 있어요");
+        document.getElementById("arEnabled").checked = false;
+        return;
+      }
+      state.autoReminder = { ...DEFAULT_AUTO_REMINDER, ...next };
+      if (fbCenter) centerConfigRef().set({ autoReminder: state.autoReminder }, { merge: true }).catch(() => {});
+      if (!next.enabled && wasOn) {
+        const n = await cancelAllAutoReminders();
+        showToast(`자동 예약을 껐어요${n ? ` (이번 주 예약 ${n}건 취소)` : ""}`);
+      } else if (next.enabled) {
+        scheduleAutoReminders(200);
+        showToast(next.testMode ? "✅ 자동 예약을 켰어요 (테스트 모드)" : "✅ 자동 예약을 켰어요");
+      } else {
+        showToast("✅ 자동 예약 설정을 저장했어요");
+      }
+      renderAutoReminderStatus();
     });
     const tsSaveBtn = document.getElementById("tsSaveBtn");
     if (tsSaveBtn) tsSaveBtn.addEventListener("click", () => {
@@ -3800,6 +4057,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
               id: doc.id, name: r.name, phone: r.phone || "", message: r.message || "",
               status: data.status || "pending", scheduleAt: data.scheduleAt || null,
               processedAt: data.processedAt || 0, createdAt: data.createdAt || 0, error: data.error || "",
+              auto: !!data.auto, cancelReason: data.cancelReason || "",
             });
           });
         });
@@ -3873,10 +4131,10 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       return `
         <div class="reserved-item-wrap">
           <div class="reserved-item" data-toggle-key="${key}" style="cursor:pointer;">
-            <span class="r-name">${escapeHtml(r.name || "")}</span>
+            <span class="r-name">${escapeHtml(r.name || "")}${r.auto ? ` <span class="lg-badge" title="결제 안내 자동 예약">자동</span>` : ``}</span>
             <span class="r-when">${escapeHtml(whenText)}</span>
             <span class="r-msg">${escapeHtml((r.message || "").slice(0, 30))}</span>
-            <span class="${st.cls}">${st.text}${r.status === "failed" && r.error ? `(${escapeHtml(r.error)})` : ""}</span>
+            <span class="${st.cls}">${st.text}${r.status === "failed" && r.error ? `(${escapeHtml(r.error)})` : ""}${r.status === "cancelled" && r.cancelReason === "paid" ? " (결제함)" : r.status === "cancelled" && r.cancelReason === "off" ? " (자동 예약 끔)" : ""}</span>
             ${canCancel ? `<button class="btn ghost" data-cancel-doc="${escapeHtml(r.id)}">취소</button>` : ``}
           </div>
           ${isExpanded ? `
@@ -4072,6 +4330,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         <button class="btn ghost" id="autoSmsCloseBtn">닫기</button>
       </div>
       <div class="sms-hint">요일마다 학생별로 예약 발송 시각이 자동으로 설정돼요. 이미 결제 체크된 학생은 기본으로 선택에서 빠져요.</div>
+      ${state.autoReminder.enabled ? `<div class="banner info" style="margin-top:0;">결제 안내 자동 예약이 켜져 있어요. 결제 안 한 학생은 수업 전날 ${escapeHtml(autoReminderTime())}에 자동으로 예약되니, 여기서 따로 보내면 문자가 두 번 갈 수 있어요.</div>` : ``}
 
       <div class="sms-section">
         <div class="sms-section-title">예약 발송 시점</div>
@@ -4370,6 +4629,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     weekLoadedKey = null;
     weekFromServerKey = null;
     stopCashReceipts();
+    stopAutoReminders();
   }
 
   function startFirestoreSync() {
@@ -4393,6 +4653,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       state.activeDay = state.students ? (days[0] || "전체") : null;
       render();
       if (!doc.metadata.fromCache && !doc.metadata.hasPendingWrites) maybeAutoReconcileLedger();
+      scheduleAutoReminders();
     }, () => {});
 
     unsubConfig = centerConfigRef().onSnapshot(doc => {
@@ -4400,6 +4661,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       if (data.tuitionSettings) state.tuitionSettings = { ...DEFAULT_TUITION_SETTINGS, ...data.tuitionSettings };
       if (data.calendar) state.calendar = data.calendar;
       if (data.smsSettings) state.smsSettings = data.smsSettings;
+      state.autoReminder = { ...DEFAULT_AUTO_REMINDER, ...(data.autoReminder || {}) };
       // 학사달력(공휴일/방학)이 바뀌면 '경과' 등 계산이 달라지므로 명단을 다시 계산해줌
       if (state.rawRosterRows && state.rawRosterRows.length) {
         const { nextSaturday } = nextWeekRange(state.refDate);
@@ -4408,6 +4670,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         state.rawCount = kept;
       }
       render();
+      scheduleAutoReminders();
     }, () => {});
 
     subscribeWeek();
@@ -4419,11 +4682,13 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     weekLoadedKey = null;
     weekFromServerKey = null;
     subscribeLedgerWeek(wk);
+    subscribeAutoReminders(wk);
     // 이미 접속했던 브라우저는 캐시와 서버가 같으면 서버 스냅샷이 따로 오지 않으므로, 서버에서 한 번 직접 확인
     centerWeekRef(wk).get({ source: "server" }).then(() => {
       if (weekKey() !== wk || !unsubWeek) return;
       weekFromServerKey = wk;
       maybeAutoReconcileLedger();
+      scheduleAutoReminders();
     }).catch(() => {});
     unsubWeek = centerWeekRef(wk).onSnapshot(doc => {
       if (weekKey() !== wk) return; // 그 사이 날짜가 바뀌었으면 무시
@@ -4455,6 +4720,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         weekFromServerKey = wk;
         maybeAutoReconcileLedger();
       }
+      scheduleAutoReminders();
     }, () => {});
   }
 
