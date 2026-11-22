@@ -722,6 +722,16 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   // 결제방법 — 현영 = 현금영수증 발행. 합계·장부·엑셀 모두 이 순서로 나눠 보여 줌
   const PAY_METHODS = ["카드", "제로페이", "이체", "이체 현영", "현금", "현금 현영"];
   function emptyByMethod() { return Object.fromEntries(PAY_METHODS.map(m => [m, 0])); }
+  // 결제방법 선택칸. 결제 전이면서 아직 고르지 않은 칸만 비워 둠 (기본값 '카드'가 모든 줄에 찍혀 보이지 않게).
+  // 비워 둘 때는 빈 첫 항목을 골라 둬서, 목록에서 '카드'를 골라도 바뀐 것으로 저장되게 함.
+  // 결제 전이라도 직접 고른 결제방법은 그대로 보임
+  function paySelectHtml(attrs, method, paid, chosen) {
+    const hide = !paid && !chosen;
+    return `<select class="pay-select ${hide ? "unpaid-hide" : ""}" ${attrs} data-hide="${hide ? "1" : "0"}">
+      ${hide ? `<option value="" selected hidden></option>` : ``}
+      ${PAY_METHODS.map(m => `<option value="${m}" ${!hide && (method || "카드") === m ? "selected" : ""}>${m}</option>`).join("")}
+    </select>`;
+  }
 
   function pad(n) { return String(n).padStart(2, "0"); }
   function fmt(d) {
@@ -2941,9 +2951,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
           <td><button class="checkbtn ${r.paid ? "on" : ""}" data-epid="${r.id}" data-epfield="paid" ${isAll ? "disabled" : ""}>${r.paid ? "✓" : ""}</button></td>
           <td><button class="checkbtn ${r.lms ? "on" : ""}" data-epid="${r.id}" data-epfield="lms" ${isAll ? "disabled" : ""}>${r.lms ? "✓" : ""}</button></td>
           <td>
-            <select class="pay-select ${r.paid ? "" : "unpaid-hide"}" data-epid="${r.id}" data-field="method" ${isAll ? "disabled" : ""}>
-              ${PAY_METHODS.map(m => `<option value="${m}" ${r.method === m ? "selected" : ""}>${m}</option>`).join("")}
-            </select>
+            ${paySelectHtml(`data-epid="${r.id}" data-field="method" ${isAll ? "disabled" : ""}`, r.method, r.paid, r.methodSet)}
           </td>
           <td><button class="ns-toggle ${r.sibling ? "on" : ""}" data-epid="${r.id}" data-toggle="sibling" ${isAll ? "disabled" : ""}>형제</button></td>
           <td><button class="ns-toggle ${r.longterm ? "on" : ""}" data-epid="${r.id}" data-toggle="longterm" ${isAll ? "disabled" : ""}>장기</button></td>
@@ -2992,9 +3000,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
           <td><button class="checkbtn ${r.paid ? "on" : ""}" data-bpid="${r.id}" data-bpfield="paid" ${isAll ? "disabled" : ""}>${r.paid ? "✓" : ""}</button></td>
           <td><button class="checkbtn ${r.lms ? "on" : ""}" data-bpid="${r.id}" data-bpfield="lms" ${isAll ? "disabled" : ""}>${r.lms ? "✓" : ""}</button></td>
           <td>
-            <select class="pay-select ${r.paid ? "" : "unpaid-hide"}" data-bpid="${r.id}" data-field="method" ${isAll ? "disabled" : ""}>
-              ${PAY_METHODS.map(m => `<option value="${m}" ${r.method === m ? "selected" : ""}>${m}</option>`).join("")}
-            </select>
+            ${paySelectHtml(`data-bpid="${r.id}" data-field="method" ${isAll ? "disabled" : ""}`, r.method, r.paid, r.methodSet)}
           </td>
           <td><button class="ns-toggle ${r.boxType === "old" ? "on" : ""}" data-bpid="${r.id}" data-boxtype="old" ${isAll ? "disabled" : ""}>old</button></td>
           <td><button class="ns-toggle ${r.boxType === "new" ? "on" : ""}" data-bpid="${r.id}" data-boxtype="new" ${isAll ? "disabled" : ""}>new</button></td>
@@ -3175,9 +3181,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
             <td><button class="checkbtn ${c.paid ? "on" : ""}" data-id="${s.id}" data-field="paid">${c.paid ? "✓" : ""}</button></td>
             <td><button class="checkbtn ${c.lms ? "on" : ""}" data-id="${s.id}" data-field="lms">${c.lms ? "✓" : ""}</button></td>
             <td>
-              <select class="pay-select ${c.paid ? "" : "unpaid-hide"}" data-id="${s.id}" data-paid="${c.paid ? "1" : "0"}">
-                ${PAY_METHODS.map(m => `<option value="${m}" ${method === m ? "selected" : ""}>${m}</option>`).join("")}
-              </select>
+              ${paySelectHtml(`data-id="${s.id}"`, method, c.paid, !!c.method)}
             </td>
             <td><input class="memo-input" data-id="${s.id}" value="${escapeHtml(c.memo || "")}" />${cashReceiptNoteHtml(s)}</td>
             <td class="mono">${(() => { const nt = computeNextTerm(s, state.calendar); return nt ? `${fmtShort(nt.termStart)}~${fmtShort(nt.termEnd)}` : "-"; })()}</td>
@@ -3366,7 +3370,9 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         const row = findExtraPayerById(sel.dataset.epid);
         if (!row) return;
         row[sel.dataset.field] = sel.value;
+        if (sel.dataset.field === "method") row.methodSet = true;
         saveExtraPayers();
+        if (sel.dataset.field === "method") render();
       });
     });
 
@@ -3440,7 +3446,9 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         const row = findBoxPayerById(sel.dataset.bpid);
         if (!row) return;
         row.method = sel.value;
+        row.methodSet = true;
         saveBoxPayers();
+        render();
       });
     });
 
@@ -3593,8 +3601,9 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     const swaps = [];
     selects.forEach(sel => {
       const div = document.createElement("div");
-      div.className = "pay-select pay-select-capture" + (sel.dataset.paid === "0" ? " unpaid-hide" : "");
-      div.textContent = sel.dataset.paid === "0" ? "" : (sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].text : "");
+      const hidden = sel.dataset.hide === "1";
+      div.className = "pay-select pay-select-capture" + (hidden ? " unpaid-hide" : "");
+      div.textContent = hidden ? "" : (sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].text : "");
       sel.style.display = "none";
       sel.insertAdjacentElement("afterend", div);
       swaps.push({ el: sel, rep: div });
