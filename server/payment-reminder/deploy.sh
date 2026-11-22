@@ -21,8 +21,20 @@ echo "프로젝트: $PROJECT"
 
 echo
 echo "[1/4] 함수 배포 (몇 분 걸려요. API를 켜겠냐고 물으면 y)"
+# Node.js 버전: 기본 nodejs22. 이 지역에서 받지 않으면 받는 것 중 가장 높은 nodejs 버전으로.
+# 직접 고르려면: RUNTIME=nodejs24 bash deploy.sh
+RUNTIME="${RUNTIME:-}"
+if [ -z "$RUNTIME" ]; then
+  AVAILABLE="$(gcloud functions runtimes list --region="$REGION" --format='value(name)' 2>/dev/null | grep -E '^nodejs[0-9]+$' | sort -V || true)"
+  if [ -z "$AVAILABLE" ] || echo "$AVAILABLE" | grep -qx nodejs22; then
+    RUNTIME=nodejs22
+  else
+    RUNTIME="$(echo "$AVAILABLE" | tail -1)"
+  fi
+fi
+echo "Node.js 런타임: $RUNTIME"
 gcloud functions deploy "$FUNC" \
-  --gen2 --region="$REGION" --runtime=nodejs20 --source=. \
+  --gen2 --region="$REGION" --runtime="$RUNTIME" --source=. \
   --entry-point=paymentReminder --trigger-http --no-allow-unauthenticated \
   --set-env-vars=TZ=Asia/Seoul --memory=256Mi --timeout=120s
 URL="$(gcloud functions describe "$FUNC" --v2 --region="$REGION" --format='value(serviceConfig.uri)' 2>/dev/null || true)"

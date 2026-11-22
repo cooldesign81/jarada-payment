@@ -68,6 +68,7 @@ cd ~/jarada-payment && git pull && bash server/payment-reminder/deploy.sh
 
 | 증상 | 확인할 것 |
 |---|---|
+| `is not a supported runtime` | 스크립트가 지원하는 Node.js를 스스로 고릅니다. 그래도 나면 `gcloud functions runtimes list --region=asia-northeast3`로 목록을 보고 `RUNTIME=nodejs24 bash server/payment-reminder/deploy.sh` 처럼 지정 |
 | 배포 중 `Permission denied` / API 사용 안 함 | 프로젝트 소유자 계정인지, 물어보는 API를 `y`로 켰는지 |
 | 시험 실행이 `403 Forbidden` | Cloud Shell 로그인 계정이 프로젝트 소유자인지. 잠시 뒤 다시 시도 |
 | 결과의 `note`가 "자동 예약 꺼짐" | 결제 매니저 ⚙ 설정에서 그 원의 자동 예약을 켰는지 |
