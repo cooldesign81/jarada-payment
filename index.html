@@ -156,6 +156,8 @@
     background: transparent; border-radius: 6px; padding: 5px 6px; width: 100px; color: var(--ink);
   }
   .memo-input:hover, .memo-input:focus { border-color: var(--line); background: #FAFBF9; outline: none; }
+  /* 지난번 현금영수증(현영) 결제 안내 — 메모 칸 아래 */
+  .cr-note { display: block; margin-top: 3px; max-width: 230px; padding: 2px 7px; border-radius: 6px; background: #E6F4EA; color: #1D6B3F; font-size: 11px; line-height: 1.45; white-space: normal; overflow-wrap: anywhere; }
   .pay-select {
     font-family: var(--sans); font-size: 12.5px; line-height: 1.3; border: 1px solid var(--line);
     background: var(--surface); border-radius: 6px; padding: 6px 20px 6px 8px; color: var(--ink); cursor: pointer;
@@ -717,7 +719,9 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     return Math.round(n);
   }
   const CLASS_RE = /^(\d+)\s*번\(([^)]+)\)\s*\(([월화수목금토일])\s*-\s*(\d+)\s+(\d{1,2}:\d{2})\)/;
-  const PAY_METHODS = ["카드", "이체", "제로페이", "현금"];
+  // 결제방법 — 현영 = 현금영수증 발행. 합계·장부·엑셀 모두 이 순서로 나눠 보여 줌
+  const PAY_METHODS = ["카드", "제로페이", "이체", "이체 현영", "현금", "현금 현영"];
+  function emptyByMethod() { return Object.fromEntries(PAY_METHODS.map(m => [m, 0])); }
 
   function pad(n) { return String(n).padStart(2, "0"); }
   function fmt(d) {
@@ -960,6 +964,8 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   state.tuitionSettings = loadTuitionSettings();
   state.ledgerSync = { status: "idle", at: null, message: "" };
   state.ledgerView = null;
+  state.cashReceipts = {};
+  state.cashReceiptsLoaded = false;
   state.survey = { mine: null, mineLoaded: false, bannerHidden: false, draft: {}, anonymous: false, sending: false, error: "" };
   state.surveyResults = null;
   state.calendarOpen = false;
@@ -1043,7 +1049,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   function todayRevenue() {
     const today = fmt(new Date());
     const todayLetter = todayDayLetter();
-    const byMethod = { "카드": 0, "이체": 0, "제로페이": 0, "현금": 0 };
+    const byMethod = emptyByMethod();
     let total = 0;
     getAllStudentsList().forEach(s => {
       const c = state.checklist[s.id];
@@ -1434,7 +1440,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   }
 
   function sumLedger(rows) {
-    const by = { "카드": 0, "이체": 0, "제로페이": 0, "현금": 0 };
+    const by = emptyByMethod();
     let total = 0;
     rows.forEach(r => { const a = ledgerAmount(r); total += a; const m = ledgerMethod(r); by[m] = (by[m] || 0) + a; });
     return { count: rows.length, total, by };
@@ -2231,7 +2237,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
 
   // 실시간 이번 주(현재 로드된 명단 기준) 결제완료 합계 — 별도 저장 안 하고 현재 체크 상태 그대로 집계
   function weekRevenueLive() {
-    const byMethod = { "카드": 0, "이체": 0, "제로페이": 0, "현금": 0 };
+    const byMethod = emptyByMethod();
     let total = 0;
     getAllStudentsList().forEach(s => {
       const c = state.checklist[s.id];
@@ -2438,7 +2444,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   }
 
   function clearChecklist() {
-    if (!window.confirm("정말로 이번 주 체크 기록(결제/LMS/엑셀 체크, 메모, 결제방법)과 오늘의 신규생·기타 결제자·연구원 상자 결제자 등록 내용을 전부 지울까요? 매출 장부의 이번 주 기록도 같이 지워져요. 지운 뒤에도 잠깐은 '되돌리기'로 복구할 수 있어요.")) {
+    if (!window.confirm("정말로 이번 주 체크 기록(결제/LMS 체크, 메모, 결제방법)과 오늘의 신규생·기타 결제자·연구원 상자 결제자 등록 내용을 전부 지울까요? 매출 장부의 이번 주 기록도 같이 지워져요. 지운 뒤에도 잠깐은 '되돌리기'로 복구할 수 있어요.")) {
       return;
     }
     const snapshot = {
@@ -2455,6 +2461,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     }
     render();
     scheduleLedgerSync();
+    syncCashReceiptsForWeek();
     showUndoToast("🗑 체크 기록과 신규생·기타·상자 결제자를 초기화했어요", () => {
       state.checklist = snapshot.checklist;
       state.extraPayers = snapshot.extraPayers;
@@ -2466,13 +2473,103 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       }
       render();
       scheduleLedgerSync();
+      syncCashReceiptsForWeek();
       showToast("↩️ 초기화를 되돌렸어요");
     });
+  }
+
+  // ---- 현금영수증(현영) 기억 ----
+  // 이체 현영·현금 현영으로 결제한 학생을 이름+전화번호로 기억해 두었다가, 다음 결제 때 결제 표 메모 칸 아래에
+  // 그때 결제방법·메모를 보여 줌. 결제 체크는 주마다, 학생 ID는 텀마다 바뀌어서 따로 쌓아 둠.
+  // centers/{원}/cashReceipts/{전화번호_이름} — prev 에는 그 전 현영 기록 하나를 보관 (이번 결제를 되돌리면 복원)
+  const CASH_RECEIPT_METHODS = ["이체 현영", "현금 현영"];
+  function isCashReceiptMethod(m) { return CASH_RECEIPT_METHODS.includes(m); }
+  function centerCashReceiptRef() { return fbDb.collection("centers").doc(fbCenter).collection("cashReceipts"); }
+  let unsubCashReceipts = null;
+  function cashReceiptKey(s) {
+    const phone = String(s.phone || "").replace(/[^0-9]/g, "");
+    return `${phone || "번호없음"}_${String(s.name || "").trim()}`.replace(/\//g, "／");
+  }
+  // 이 학생의 현영 기록. 전화번호가 바뀌었을 수 있으니, 정확히 맞는 게 없으면 같은 이름이 하나뿐일 때 그 기록
+  function cashReceiptFor(s) {
+    const exact = state.cashReceipts[cashReceiptKey(s)];
+    if (exact) return { ...exact, phoneMatched: true };
+    const name = String(s.name || "").trim();
+    const same = Object.values(state.cashReceipts).filter(r => r.name === name);
+    return same.length === 1 ? { ...same[0], phoneMatched: false } : null;
+  }
+  function cashReceiptNoteHtml(s) {
+    const cr = cashReceiptFor(s);
+    if (!cr) return "";
+    // 이번 주 이 결제로 방금 기록된 것이면 굳이 다시 보여 주지 않음 — 그 전 기록이 있으면 그걸 보여 줌
+    const shown = cr.studentId === s.id && cr.week === weekKey() ? cr.prev : cr;
+    if (!shown) return "";
+    const when = shown.paidDate ? fmtShort(shown.paidDate) : "";
+    const title = `지난 결제 ${shown.method}${when ? ` (${shown.paidDate})` : ""}${shown.memo ? ` · ${shown.memo}` : ""}${cr.phoneMatched ? "" : " · 전화번호가 달라 이름으로 찾은 기록"}`;
+    return `<span class="cr-note" title="${escapeHtml(title)}">🧾 지난 결제 ${escapeHtml(shown.method)}${when ? ` ${escapeHtml(when)}` : ""}${shown.memo ? ` · ${escapeHtml(shown.memo)}` : " · 메모 없음"}${cr.phoneMatched ? "" : " (이름으로 찾음)"}</span>`;
+  }
+
+  function subscribeCashReceipts() {
+    if (unsubCashReceipts) { unsubCashReceipts(); unsubCashReceipts = null; }
+    state.cashReceipts = {};
+    state.cashReceiptsLoaded = false;
+    if (!fbCenter) return;
+    const center = fbCenter;
+    unsubCashReceipts = centerCashReceiptRef().onSnapshot(snap => {
+      if (fbCenter !== center) return;
+      const m = {};
+      snap.forEach(d => { m[d.id] = d.data(); });
+      const changed = JSON.stringify(m) !== JSON.stringify(state.cashReceipts);
+      state.cashReceipts = m;
+      state.cashReceiptsLoaded = true;
+      if (changed) render();
+    }, () => {});
+  }
+  function stopCashReceipts() {
+    if (unsubCashReceipts) { unsubCashReceipts(); unsubCashReceipts = null; }
+    state.cashReceipts = {};
+    state.cashReceiptsLoaded = false;
+  }
+
+  // 결제 표에서 결제·결제방법·메모가 바뀔 때 호출: 현영 결제면 기록, 이번 주 현영 결제를 되돌리면 그 전 기록으로 복원
+  function rememberCashReceipt(id) {
+    if (!fbCenter || !state.cashReceiptsLoaded || weekLoadedKey !== weekKey()) return;
+    const s = getAllStudentsList().find(x => x.id === id);
+    if (!s) return;
+    const c = state.checklist[id] || {};
+    const key = cashReceiptKey(s);
+    const cur = state.cashReceipts[key];
+    const wk = weekKey();
+    const fromHere = !!(cur && cur.studentId === id && cur.week === wk);
+    const ref = centerCashReceiptRef().doc(key);
+    if (c.paid && isCashReceiptMethod(c.method)) {
+      const memo = String(c.memo || "").trim();
+      const paidDate = c.paidDate || fmt(new Date());
+      if (fromHere && cur.method === c.method && cur.memo === memo && cur.paidDate === paidDate) return;
+      let prev = null;
+      if (fromHere) prev = cur.prev || null;
+      else if (cur) { const { prev: _drop, ...rest } = cur; prev = rest; }
+      const data = {
+        name: String(s.name || "").trim(), phone: s.phone || "", method: c.method, memo, paidDate,
+        week: wk, studentId: id, prev,
+        updatedAt: Date.now(), updatedBy: (fbAuth.currentUser && fbAuth.currentUser.email) || "",
+      };
+      state.cashReceipts[key] = data;
+      ref.set(data).catch(() => {});
+    } else if (fromHere) {
+      if (cur.prev) { state.cashReceipts[key] = cur.prev; ref.set(cur.prev).catch(() => {}); }
+      else { delete state.cashReceipts[key]; ref.delete().catch(() => {}); }
+    }
+  }
+  // 체크 초기화·되돌리기·백업 불러오기처럼 한꺼번에 바뀐 뒤 이번 주 학생 전체를 다시 맞춤
+  function syncCashReceiptsForWeek() {
+    getAllStudentsList().forEach(s => rememberCashReceipt(s.id));
   }
 
   function updateEntry(id, patch) {
     state.checklist[id] = { ...(state.checklist[id] || {}), ...patch };
     saveChecklist();
+    rememberCashReceipt(id);
     render();
   }
 
@@ -2532,6 +2629,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         state.activeDay = days[0] || "전체";
         try {
           saveChecklist();
+          syncCashReceiptsForWeek();
         } catch (err) {}
         state.message = "백업 파일을 불러왔어요.";
         state.messageType = "info";
@@ -2824,7 +2922,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         <div class="table-wrap"><table>
           <thead><tr>
             <th>NO</th>${isAll ? `<th>요일</th>` : ``}<th>이름</th><th>나이</th><th>금액</th>
-            <th class="check-head">결제</th><th class="check-head">LMS</th><th class="check-head">엑셀</th>
+            <th class="check-head">결제</th><th class="check-head">LMS</th>
             <th>결제방법</th><th>형제</th><th>장기</th><th>분류</th><th>메모</th><th></th>
           </tr></thead>
           <tbody>
@@ -2842,7 +2940,6 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
           <td><input class="ns-input ns-num" data-epid="${r.id}" data-field="amount" type="text" value="${formatManwon(Number(r.amount) || 0)}" ${isAll ? "readonly" : ""} /></td>
           <td><button class="checkbtn ${r.paid ? "on" : ""}" data-epid="${r.id}" data-epfield="paid" ${isAll ? "disabled" : ""}>${r.paid ? "✓" : ""}</button></td>
           <td><button class="checkbtn ${r.lms ? "on" : ""}" data-epid="${r.id}" data-epfield="lms" ${isAll ? "disabled" : ""}>${r.lms ? "✓" : ""}</button></td>
-          <td><button class="checkbtn ${r.excel ? "on" : ""}" data-epid="${r.id}" data-epfield="excel" ${isAll ? "disabled" : ""}>${r.excel ? "✓" : ""}</button></td>
           <td>
             <select class="pay-select ${r.paid ? "" : "unpaid-hide"}" data-epid="${r.id}" data-field="method" ${isAll ? "disabled" : ""}>
               ${PAY_METHODS.map(m => `<option value="${m}" ${r.method === m ? "selected" : ""}>${m}</option>`).join("")}
@@ -2876,13 +2973,13 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         <div class="table-wrap"><table>
           <thead><tr>
             <th>NO</th>${isAll ? `<th>요일</th>` : ``}<th>이름</th><th>나이</th><th>금액</th>
-            <th class="check-head">결제</th><th class="check-head">LMS</th><th class="check-head">엑셀</th>
+            <th class="check-head">결제</th><th class="check-head">LMS</th>
             <th>결제방법</th><th>old</th><th>new</th><th>메모</th><th></th>
           </tr></thead>
           <tbody>
     `;
     if (rows.length === 0) {
-      html += `<tr><td colspan="${isAll ? 13 : 12}" class="ns-empty">${isAll ? "등록된 연구원 상자 결제자가 없어요." : `연구원 상자 결제자가 있으면 "+ 추가"를 눌러주세요.`}</td></tr>`;
+      html += `<tr><td colspan="${isAll ? 12 : 11}" class="ns-empty">${isAll ? "등록된 연구원 상자 결제자가 없어요." : `연구원 상자 결제자가 있으면 "+ 추가"를 눌러주세요.`}</td></tr>`;
     }
     rows.forEach((r, i) => {
       html += `
@@ -2894,7 +2991,6 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
           <td><input class="ns-input ns-num" data-bpid="${r.id}" data-field="amount" type="text" value="${formatManwon(Number(r.amount) || 0)}" ${isAll ? "readonly" : ""} /></td>
           <td><button class="checkbtn ${r.paid ? "on" : ""}" data-bpid="${r.id}" data-bpfield="paid" ${isAll ? "disabled" : ""}>${r.paid ? "✓" : ""}</button></td>
           <td><button class="checkbtn ${r.lms ? "on" : ""}" data-bpid="${r.id}" data-bpfield="lms" ${isAll ? "disabled" : ""}>${r.lms ? "✓" : ""}</button></td>
-          <td><button class="checkbtn ${r.excel ? "on" : ""}" data-bpid="${r.id}" data-bpfield="excel" ${isAll ? "disabled" : ""}>${r.excel ? "✓" : ""}</button></td>
           <td>
             <select class="pay-select ${r.paid ? "" : "unpaid-hide"}" data-bpid="${r.id}" data-field="method" ${isAll ? "disabled" : ""}>
               ${PAY_METHODS.map(m => `<option value="${m}" ${r.method === m ? "selected" : ""}>${m}</option>`).join("")}
@@ -2915,12 +3011,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     const { today, total: todayTotal, byMethod: todayByMethod } = todayRevenue();
     const { total: weekTotal, byMethod: weekByMethod } = weekRevenueLive();
     const { nextMonday, nextSaturday } = nextWeekRange(state.refDate);
-    const methodRow = (byMethod) => `
-      <span>카드 <b>${byMethod["카드"].toLocaleString()}원</b></span>
-      <span>이체 <b>${byMethod["이체"].toLocaleString()}원</b></span>
-      <span>제로페이 <b>${byMethod["제로페이"].toLocaleString()}원</b></span>
-      <span>현금 <b>${byMethod["현금"].toLocaleString()}원</b></span>
-    `;
+    const methodRow = (byMethod) => PAY_METHODS.map(m => `<span>${m} <b>${(byMethod[m] || 0).toLocaleString()}원</b></span>`).join("");
     return `
       <div class="revenue-card">
         <div class="revenue-card-head">
@@ -3062,7 +3153,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
           <thead><tr>
             <th>NO</th><th>이름</th><th>나이</th><th>교사</th><th>수업시간</th>
             <th>8회차 토</th><th>회차</th><th>경과</th><th>할인</th><th>원비</th>
-            <th class="check-head">결제</th><th class="check-head">LMS</th><th class="check-head">엑셀</th><th>결제방법</th><th>메모</th><th>다음 텀</th>
+            <th class="check-head">결제</th><th class="check-head">LMS</th><th>결제방법</th><th>메모</th><th>다음 텀</th>
           </tr></thead>
           <tbody>
       `;
@@ -3083,13 +3174,12 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
             <td class="mono">${formatManwon(tuitionFor(s))}</td>
             <td><button class="checkbtn ${c.paid ? "on" : ""}" data-id="${s.id}" data-field="paid">${c.paid ? "✓" : ""}</button></td>
             <td><button class="checkbtn ${c.lms ? "on" : ""}" data-id="${s.id}" data-field="lms">${c.lms ? "✓" : ""}</button></td>
-            <td><button class="checkbtn ${c.excel ? "on" : ""}" data-id="${s.id}" data-field="excel">${c.excel ? "✓" : ""}</button></td>
             <td>
               <select class="pay-select ${c.paid ? "" : "unpaid-hide"}" data-id="${s.id}" data-paid="${c.paid ? "1" : "0"}">
                 ${PAY_METHODS.map(m => `<option value="${m}" ${method === m ? "selected" : ""}>${m}</option>`).join("")}
               </select>
             </td>
-            <td><input class="memo-input" data-id="${s.id}" value="${escapeHtml(c.memo || "")}" /></td>
+            <td><input class="memo-input" data-id="${s.id}" value="${escapeHtml(c.memo || "")}" />${cashReceiptNoteHtml(s)}</td>
             <td class="mono">${(() => { const nt = computeNextTerm(s, state.calendar); return nt ? `${fmtShort(nt.termStart)}~${fmtShort(nt.termEnd)}` : "-"; })()}</td>
           </tr>
         `;
@@ -3219,7 +3309,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       inp.addEventListener("blur", () => updateEntry(inp.dataset.id, { memo: inp.value }));
     });
 
-    document.querySelectorAll(".pay-select").forEach(sel => {
+    document.querySelectorAll(".pay-select[data-id]").forEach(sel => {
       sel.addEventListener("change", () => updateEntry(sel.dataset.id, { method: sel.value }));
     });
 
@@ -3248,7 +3338,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       state.extraPayers[state.activeDay].push({
         id: "ep_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7),
         name: "", age: "", amount: Number(state.tuitionSettings.base) || 0,
-        paid: false, lms: false, excel: false, method: "카드",
+        paid: false, lms: false, method: "카드",
         sibling: false, longterm: false, category: "신규생", memo: "", paidDate: null,
       });
       saveExtraPayers();
@@ -3322,7 +3412,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       state.boxPayers[state.activeDay].push({
         id: "bp_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7),
         name: "", age: "", amount: 0,
-        paid: false, lms: false, excel: false, method: "카드",
+        paid: false, lms: false, method: "카드",
         boxType: null, memo: "", paidDate: null,
       });
       saveBoxPayers();
@@ -4235,11 +4325,13 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     ledgerSyncPending = false;
     weekLoadedKey = null;
     weekFromServerKey = null;
+    stopCashReceipts();
   }
 
   function startFirestoreSync() {
     stopFirestoreSync();
     loadMySurvey();
+    subscribeCashReceipts();
 
     unsubRoster = centerRosterRef().onSnapshot(doc => {
       const data = doc.exists ? doc.data() : null;
