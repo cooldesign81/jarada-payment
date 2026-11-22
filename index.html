@@ -214,6 +214,13 @@
   }
   .ns-input.ns-num { width: 80px; font-family: var(--mono); }
   .ns-input:hover, .ns-input:focus { border-color: var(--line); background: #FAFBF9; outline: none; }
+  /* 결제 표 원비 칸: 평소엔 글자처럼, 누르면 고칠 수 있음. 고친 원비는 주황색 */
+  .tuition-input {
+    font-family: var(--mono); font-size: 12.5px; border: 1px solid transparent; background: transparent;
+    border-radius: 6px; padding: 5px 6px; width: 74px; color: var(--ink-soft); cursor: text;
+  }
+  .tuition-input:hover, .tuition-input:focus { border-color: var(--line); background: #FAFBF9; outline: none; color: var(--ink); }
+  .tuition-input.edited { color: var(--accent); font-weight: 700; }
   .ns-toggle {
     font-family: var(--sans); font-size: 12px; font-weight: 700; border: 1.5px solid var(--line);
     background: var(--surface); color: var(--ink-soft); border-radius: 7px; padding: 5px 10px; cursor: pointer;
@@ -311,7 +318,7 @@
     tbody tr.late-1, tbody tr.late-2, tbody tr.late-3 { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     .checkbtn { width: 14px; height: 14px; border-radius: 4px; border: 1.2px solid #333 !important; color: transparent !important; background: #fff !important; }
     .checkbtn.on { background: #333 !important; color: #fff !important; }
-    .memo-input, .pay-select { font-size: 9px; padding: 2px 3px; width: auto; height: auto; background-image: none; -webkit-appearance: none; appearance: none; }
+    .memo-input, .pay-select, .tuition-input { font-size: 9px; padding: 2px 3px; width: auto; height: auto; background-image: none; -webkit-appearance: none; appearance: none; }
     .pay-select.unpaid-hide { color: transparent; }
     .sibling-tag { font-size: 8.5px; padding: 1px 4px; }
     .print-only { font-size: 14px; margin-bottom: 8px; }
@@ -703,6 +710,13 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     else if (hasEtc) discount = Number(t.etcAmount) || 0;
     return base - discount;
   }
+  // 이번 결제에서 원비를 직접 고쳤으면 그 금액(체크 기록 amount), 아니면 설정·할인으로 계산한 원비.
+  // 고친 원비는 그 주 체크 기록에만 저장돼서 다음 텀에는 다시 계산한 원비로 시작
+  function hasTuitionOverride(c) { return !!c && c.amount !== undefined && c.amount !== null && c.amount !== ""; }
+  function amountFor(entry) {
+    const c = state.checklist[entry.id];
+    return hasTuitionOverride(c) ? Number(c.amount) || 0 : tuitionFor(entry);
+  }
   function formatManwon(v) {
     if (v === null || v === undefined) return "-";
     const manwon = v / 10000;
@@ -1064,7 +1078,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     getAllStudentsList().forEach(s => {
       const c = state.checklist[s.id];
       if (c && c.paid && c.paidDate === today && s.day === todayLetter) {
-        const t = tuitionFor(s) || 0;
+        const t = amountFor(s) || 0;
         total += t;
         const m = c.method || "카드";
         byMethod[m] = (byMethod[m] || 0) + t;
@@ -1108,7 +1122,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
           teacher: s.teacher || "-",
           time: s.time || "-",
           method: c.method || "카드",
-          amount: tuitionFor(s) || 0,
+          amount: amountFor(s) || 0,
           paidDate: c.paidDate || "",
           memo: c.memo || "",
           nextTerm: nt ? `${fmtShort(nt.termStart)}~${fmtShort(nt.termEnd)}` : "-",
@@ -2252,7 +2266,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     getAllStudentsList().forEach(s => {
       const c = state.checklist[s.id];
       if (c && c.paid) {
-        const t = tuitionFor(s) || 0;
+        const t = amountFor(s) || 0;
         total += t;
         const m = c.method || "카드";
         byMethod[m] = (byMethod[m] || 0) + t;
@@ -2280,7 +2294,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
 
   function fillTemplate(tpl, s) {
     const nt = computeNextTerm(s, state.calendar);
-    const tuition = tuitionFor(s);
+    const tuition = amountFor(s);
     return tpl
       .replaceAll("{이름}", cleanNameForSms(s.name))
       .replaceAll("{나이}", String(s.age))
@@ -3177,7 +3191,12 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
             <td class="mono">${escapeHtml(s.session)}</td>
             <td class="mono">${s.late >= 1 ? `${s.late}주` : ""}</td>
             <td>${s.discount ? `<span class="sibling-tag">${escapeHtml(s.discount)}</span>` : ``}</td>
-            <td class="mono">${formatManwon(tuitionFor(s))}</td>
+            <td>${(() => {
+              const edited = hasTuitionOverride(c);
+              const base = tuitionFor(s);
+              const tip = edited ? `기본 원비 ${formatManwon(base)}에서 고친 금액이에요. 비우면 기본 원비로 돌아가요.` : `눌러서 이번 결제 원비를 고칠 수 있어요. 예: 38 → 38만원`;
+              return `<input class="tuition-input ${edited ? "edited" : ""}" data-id="${s.id}" type="text" inputmode="decimal" value="${formatManwon(amountFor(s))}" title="${escapeHtml(tip)}" aria-label="${escapeHtml(s.name)} 원비" />`;
+            })()}</td>
             <td><button class="checkbtn ${c.paid ? "on" : ""}" data-id="${s.id}" data-field="paid">${c.paid ? "✓" : ""}</button></td>
             <td><button class="checkbtn ${c.lms ? "on" : ""}" data-id="${s.id}" data-field="lms">${c.lms ? "✓" : ""}</button></td>
             <td>
@@ -3306,6 +3325,22 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
           patch.paidDate = newVal ? fmt(new Date()) : null;
         }
         updateEntry(id, patch);
+      });
+    });
+
+    document.querySelectorAll(".tuition-input").forEach(inp => {
+      inp.addEventListener("keydown", e => { if (e.key === "Enter") inp.blur(); });
+      inp.addEventListener("blur", () => {
+        const s = getAllStudentsList().find(x => x.id === inp.dataset.id);
+        if (!s) return;
+        const c = state.checklist[s.id];
+        const text = inp.value.trim();
+        let next = text === "" ? null : parseWonInput(text);
+        if (next !== null && next === tuitionFor(s)) next = null;
+        const cur = hasTuitionOverride(c) ? Number(c.amount) : null;
+        if (cur === next) { inp.value = formatManwon(amountFor(s)); return; }
+        updateEntry(s.id, { amount: next });
+        showToast(next === null ? `${s.name} 원비를 기본 원비로 되돌렸어요` : `${s.name} 원비를 ${formatManwon(next)}으로 고쳤어요`);
       });
     });
 
@@ -3597,7 +3632,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     // html2canvas는 네이티브 <select>/<input> 값을 제대로 못 그려서 글씨가 깨지거나 잘려 보임
     // -> 캡처 순간만 일반 텍스트(span/div)로 바꿔치기
     const selects = target.querySelectorAll("select.pay-select");
-    const inputs = target.querySelectorAll("input.ns-input, input.memo-input");
+    const inputs = target.querySelectorAll("input.ns-input, input.memo-input, input.tuition-input");
     const swaps = [];
     selects.forEach(sel => {
       const div = document.createElement("div");
