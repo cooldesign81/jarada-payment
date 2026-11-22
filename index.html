@@ -1046,6 +1046,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   state.autoReminder = { ...DEFAULT_AUTO_REMINDER };
   state.autoReminders = {};        // 이번 주 자동 예약 문자 (smsQueue 문서 id -> 내용)
   state.autoRemindersLoaded = false;
+  state.autoReminderError = "";
   state.autoSmsTime = loadAutoReserveTime();
   state.autoSmsCustomDate = "";
 
@@ -2723,12 +2724,15 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
                 { scheduleAt: at.toISOString(), recipients, testMode: !!ar.testMode, updatedAt: Date.now(), updatedBy: myEmail() });
             }
           }
+          state.autoReminderError = "";
         } catch (e) {
-          // 권한·연결 문제는 다음에 화면이 바뀔 때 다시 시도
+          // 권한·연결 문제는 다음에 화면이 바뀔 때 다시 시도하고, 설정 창 상태 줄에 이유를 보여 줌
+          state.autoReminderError = e && e.code === "permission-denied" ? "문자 대기열에 쓸 권한이 없어요" : "연결 문제로 일부를 예약하지 못했어요";
         }
       }
     } finally {
       autoReminderRunning = false;
+      renderAutoReminderStatus();
     }
   }
 
@@ -2794,7 +2798,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     if (st.sent) parts.push(`발송 ${st.sent}명`);
     if (st.missed) parts.push(`보낼 시각이 지나 예약 못 함 ${st.missed}명`);
     if (st.noPhone) parts.push(`연락처 없음 ${st.noPhone}명`);
-    return `자동 예약 켜짐${ar.testMode ? " (테스트 모드)" : ""} · 수업 전날 ${autoReminderTime()} · ${parts.join(" · ")}`;
+    return `자동 예약 켜짐${ar.testMode ? " (테스트 모드)" : ""} · 수업 전날 ${autoReminderTime()} · ${parts.join(" · ")}${state.autoReminderError ? ` · ⚠ ${state.autoReminderError}` : ""}`;
   }
   function renderAutoReminderStatus() {
     const el = document.getElementById("arStatus");
