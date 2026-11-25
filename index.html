@@ -356,6 +356,17 @@
   }
   #ledgerModal.open { display: flex; }
   .ledger-box { width: 1080px; }
+  #cashModal {
+    position: fixed; inset: 0; background: rgba(27,42,34,0.55); display: none;
+    align-items: center; justify-content: center; z-index: 999; padding: 20px;
+  }
+  #cashModal.open { display: flex; }
+  .cash-box { width: 980px; }
+  .cc-check { width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; vertical-align: middle; }
+  .cc-check:disabled { cursor: not-allowed; }
+  .lg-table tr.cc-done td { color: var(--ink-soft); background: #FAFBF9; }
+  .lg-table tr.cc-done td b { color: var(--ink-soft); }
+  .cc-when { font-family: var(--mono); font-size: 12px; white-space: nowrap; }
   .lg-filters { display: flex; flex-direction: column; gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); }
   .lg-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .lg-row > .lg-label { font-size: 12px; font-weight: 700; color: var(--ink-soft); min-width: 52px; }
@@ -495,6 +506,10 @@
 
   <div id="ledgerModal">
     <div class="capture-box ledger-box" id="ledgerBox"></div>
+  </div>
+
+  <div id="cashModal">
+    <div class="capture-box cash-box" id="cashBox" role="dialog" aria-label="현금 수거"></div>
   </div>
 
   <div id="toast"></div>
@@ -1823,6 +1838,233 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     showToast(`⤓ 엑셀로 저장했어요 (${rows.length}건)`);
   }
 
+  // ---- 현금 수거 (관리자 계정만) ----
+  // 매출 장부에서 결제방법이 현금·현금 현영인 결제만 모아, 관리자가 직접 수거한 것을 체크함.
+  // 체크는 원마다 centers/{원}/data/cashCollect 문서의 items.{장부 문서 id} 에 { at, by } 로 저장 (체크를 풀면 null).
+  // 다른 계정 화면에는 버튼과 목록이 나오지 않고, 이 문서를 불러오지도 않음.
+  function cashCollectRef(center) { return fbDb.collection("centers").doc(center).collection("data").doc("cashCollect"); }
+  function isCashMethod(m) { return String(m || "").startsWith("현금"); }
+  function cashKey(r) { return `${r.center}::${r.id}`; }
+  function cashMark(r) {
+    const cv = state.cashView;
+    const items = cv && cv.marks[r.center];
+    return (items && items[r.id]) || null;
+  }
+  function cashCancelled(r) { return r.status === "전액 취소" || ledgerAmount(r) <= 0; }
+
+  function openCashCollect() {
+    if (!state.isAdmin) return;
+    if (!state.cashView) {
+      state.cashView = { centers: "all", ...ledgerPresetRange("3months"), show: "todo", q: "",
+        rows: null, marks: {}, markErrors: {}, loading: false, errors: [], loadedKey: "", keep: new Set() };
+    }
+    state.cashView.keep = new Set();
+    document.getElementById("cashModal").classList.add("open");
+    renderCashBox();
+    loadCashView(true);
+  }
+  function closeCashCollect() {
+    const m = document.getElementById("cashModal");
+    if (m) m.classList.remove("open");
+  }
+
+  async function loadCashView(force) {
+    const cv = state.cashView;
+    if (!cv || !state.isAdmin) return;
+    const centers = ledgerCentersFor(cv.centers);
+    const key = `${centers.join(",")}|${cv.from}|${cv.to}`;
+    if (!force && cv.loadedKey === key && cv.rows) { renderCashResults(); return; }
+    const token = (loadCashView._t = (loadCashView._t || 0) + 1);
+    cv.loading = true;
+    cv.errors = [];
+    renderCashResults();
+    const results = await Promise.all(centers.map(async c => {
+      const out = { c };
+      try {
+        const snap = await centerLedgerRef(c).where("paidDate", ">=", cv.from).where("paidDate", "<=", cv.to).get();
+        out.docs = snap.docs.map(d => { const x = d.data(); return { ...x, id: d.id, center: x.center || c }; });
+      } catch (e) { out.error = ledgerErrorText(e); }
+      try {
+        const mk = await cashCollectRef(c).get();
+        out.items = (mk.exists && mk.data().items) || {};
+      } catch (e) {
+        out.markError = e && e.code === "permission-denied" ? "수거 체크 기록을 읽을 권한이 없어요" : "수거 체크 기록을 불러오지 못했어요";
+      }
+      return out;
+    }));
+    if (token !== loadCashView._t || state.cashView !== cv) return; // 그 사이 조건이 바뀌었으면 무시
+    cv.rows = [].concat(...results.map(r => r.docs || [])).filter(r => !r.removed && isCashMethod(ledgerMethod(r)));
+    cv.marks = {};
+    cv.markErrors = {};
+    results.forEach(r => { if (r.items) cv.marks[r.c] = r.items; if (r.markError) cv.markErrors[r.c] = r.markError; });
+    cv.errors = results.filter(r => r.error || r.markError).map(r => `${r.c}: ${r.error || r.markError}`);
+    cv.loading = false;
+    cv.loadedKey = key;
+    renderCashResults();
+  }
+
+  function cashRowsInRange() {
+    const cv = state.cashView;
+    // 전액 취소된 결제는 받을 현금이 없으니 빼되, 이미 수거 체크한 것은 남겨 둠
+    return (cv.rows || []).filter(r => !cashCancelled(r) || cashMark(r));
+  }
+  function cashRowsShown() {
+    const cv = state.cashView;
+    const q = (cv.q || "").trim().toLowerCase();
+    return cashRowsInRange().filter(r => {
+      const done = !!cashMark(r);
+      // 방금 체크하거나 푼 줄은 보기 조건과 달라져도 창을 다시 열 때까지 그 자리에 둠 (잘못 눌렀을 때 되돌릴 수 있게)
+      const keep = cv.keep.has(cashKey(r));
+      if (cv.show === "todo" && done && !keep) return false;
+      if (cv.show === "done" && !done && !keep) return false;
+      return !q || [r.name, r.memo, r.note, r.teacher].some(v => String(v || "").toLowerCase().includes(q));
+    });
+  }
+
+  function renderCashBox() {
+    const box = document.getElementById("cashBox");
+    const cv = state.cashView;
+    if (!box || !cv) return;
+    const presets = [["week", "이번 주"], ["month", "이번 달"], ["lastMonth", "지난 달"], ["3months", "최근 3개월"], ["year", "올해"], ["all", "전체 기간"]];
+    const activePreset = (presets.find(([k]) => { const r = ledgerPresetRange(k); return r.from === cv.from && r.to === cv.to; }) || [""])[0];
+    box.innerHTML = `
+      <div class="capture-actions" style="justify-content: space-between; align-items: center;">
+        <div class="sms-title">💵 현금 수거</div>
+        <button class="btn ghost" id="ccCloseBtn">닫기</button>
+      </div>
+      <div class="lg-filters">
+        <div class="lg-row">
+          <span class="lg-label">원</span>
+          <select id="ccCenter" class="sms-input">
+            <option value="all" ${cv.centers === "all" ? "selected" : ""}>세 원 전체</option>
+            ${CENTER_LIST.map(c => `<option value="${escapeHtml(c)}" ${cv.centers === c ? "selected" : ""}>${escapeHtml(c)}</option>`).join("")}
+          </select>
+        </div>
+        <div class="lg-row">
+          <span class="lg-label">기간</span>
+          ${presets.map(([k, label]) => `<button class="rq-tab ${activePreset === k ? "active" : ""}" data-ccpreset="${k}">${label}</button>`).join("")}
+        </div>
+        <div class="lg-row">
+          <span class="lg-label"></span>
+          <span class="lg-sub">월</span> <input type="month" id="ccMonth" class="sms-input" value="${escapeHtml(rangeMonth(cv.from, cv.to))}" />
+          <span class="lg-sub">또는</span>
+          <input type="date" id="ccFrom" class="sms-input" value="${escapeHtml(cv.from)}" /> ~
+          <input type="date" id="ccTo" class="sms-input" value="${escapeHtml(cv.to)}" />
+        </div>
+        <div class="lg-row">
+          <span class="lg-label">보기</span>
+          ${[["todo", "수거 안 한 것"], ["done", "수거한 것"], ["all", "전체"]].map(([k, label]) => `<button class="rq-tab ${cv.show === k ? "active" : ""}" data-ccshow="${k}">${label}</button>`).join("")}
+          <input id="ccSearch" class="sms-input" placeholder="이름·메모 검색" value="${escapeHtml(cv.q)}" style="flex:1; min-width:160px;" />
+        </div>
+      </div>
+      <div id="ccResults"></div>
+      <div class="sms-hint">매출 장부에서 결제방법이 현금·현금 현영인 결제만 모았어요. 직접 수거한 결제를 체크하면 바로 저장되고, 잘못 눌렀으면 다시 눌러 풀면 돼요. 전액 취소된 결제는 빠지고, 장부에서 결제방법이나 금액을 고치면 여기에도 반영돼요. 이 버튼과 목록은 관리자 계정에만 보여요.</div>
+    `;
+    document.getElementById("ccCloseBtn").addEventListener("click", closeCashCollect);
+    const reload = () => { cv.keep = new Set(); renderCashBox(); loadCashView(); };
+    const setRange = (from, to) => {
+      if (!from || !to) return;
+      if (from > to) [from, to] = [to, from];
+      cv.from = from; cv.to = to;
+      reload();
+    };
+    const centerSel = document.getElementById("ccCenter");
+    centerSel.addEventListener("change", () => { cv.centers = centerSel.value; reload(); });
+    box.querySelectorAll("[data-ccpreset]").forEach(b => b.addEventListener("click", () => {
+      const r = ledgerPresetRange(b.dataset.ccpreset);
+      setRange(r.from, r.to);
+    }));
+    const monthInput = document.getElementById("ccMonth");
+    monthInput.addEventListener("change", () => {
+      if (!monthInput.value) return;
+      const r = monthBounds(monthInput.value);
+      setRange(r.from, r.to);
+    });
+    const fromInput = document.getElementById("ccFrom");
+    const toInput = document.getElementById("ccTo");
+    fromInput.addEventListener("change", () => setRange(fromInput.value, toInput.value));
+    toInput.addEventListener("change", () => setRange(fromInput.value, toInput.value));
+    box.querySelectorAll("[data-ccshow]").forEach(b => b.addEventListener("click", () => {
+      cv.show = b.dataset.ccshow;
+      cv.keep = new Set();
+      box.querySelectorAll("[data-ccshow]").forEach(x => x.classList.toggle("active", x === b));
+      renderCashResults();
+    }));
+    const search = document.getElementById("ccSearch");
+    search.addEventListener("input", () => { cv.q = search.value; renderCashResults(); });
+    renderCashResults();
+  }
+
+  function renderCashResults() {
+    const el = document.getElementById("ccResults");
+    const cv = state.cashView;
+    if (!el || !cv) return;
+    const won = (n) => `${(Number(n) || 0).toLocaleString()}원`;
+    const errors = (cv.errors || []).map(e => `<div class="lg-error">⚠ ${escapeHtml(e)}</div>`).join("");
+    if (cv.loading || !cv.rows) { el.innerHTML = `${errors}<div class="sms-hint">불러오는 중…</div>`; return; }
+    const all = cashRowsInRange();
+    const todo = all.filter(r => !cashMark(r)), done = all.filter(r => cashMark(r));
+    const total = rows => rows.reduce((n, r) => n + ledgerAmount(r), 0);
+    const byMethod = (rows, m) => total(rows.filter(r => ledgerMethod(r) === m));
+    const multi = ledgerCentersFor(cv.centers).length > 1;
+    const rows = sortLedgerRows(cashRowsShown(), true);
+    let html = `
+      ${errors}
+      <div class="lg-summary">
+        <span class="lg-total">수거 안 한 현금 <b>${won(total(todo))}</b></span>
+        <span><b>${todo.length.toLocaleString()}</b>건</span>
+        <span>현금 <b>${won(byMethod(todo, "현금"))}</b></span>
+        <span>현금 현영 <b>${won(byMethod(todo, "현금 현영"))}</b></span>
+        <span>수거함 <b>${won(total(done))}</b> (${done.length.toLocaleString()}건)</span>
+      </div>
+    `;
+    if (!rows.length) {
+      const empty = cv.show === "todo" ? (all.length ? "이 기간의 현금은 모두 수거했어요." : "이 기간에 현금 결제가 없어요.") : cv.show === "done" ? "이 기간에 수거 체크한 결제가 없어요." : "이 기간에 현금 결제가 없어요.";
+      el.innerHTML = html + `<div class="sms-hint" style="padding:16px 0;">${empty}</div>`;
+      return;
+    }
+    html += `<div class="lg-table" data-keep-scroll="cc"><table>
+      <thead><tr><th>수거</th><th>체크일</th>${multi ? `<th>원</th>` : ``}<th>구분</th><th>이름</th><th>결제방법</th><th class="num">금액</th><th>메모</th><th>수거한 날</th></tr></thead>
+      <tbody>${rows.map(r => {
+        const mark = cashMark(r);
+        const st = ledgerStatus(r);
+        const locked = !!cv.markErrors[r.center];
+        return `<tr class="${mark ? "cc-done" : ""}">
+          <td><input type="checkbox" class="cc-check" data-cc="${escapeHtml(cashKey(r))}" ${mark ? "checked" : ""} ${locked ? "disabled" : ""} aria-label="${escapeHtml(r.name)} 수거" /></td>
+          <td class="mono">${escapeHtml(r.paidDate)}</td>${multi ? `<td>${escapeHtml(r.center)}</td>` : ``}
+          <td>${escapeHtml(ledgerKindLabel(r))}</td>
+          <td><b>${escapeHtml(r.name)}</b>${st ? `<span class="lg-badge ${st.includes("취소") ? "cancel" : ""}">${escapeHtml(st)}</span>` : ``}</td>
+          <td>${escapeHtml(ledgerMethod(r))}</td>
+          <td class="num">${won(ledgerAmount(r))}</td>
+          <td class="memo">${escapeHtml(r.memo)}${r.note ? `<span class="lg-note">📝 ${escapeHtml(r.note)}</span>` : ``}</td>
+          <td class="cc-when">${mark && mark.at ? escapeHtml(ledgerDateTime(mark.at)) : ``}</td>
+        </tr>`; }).join("")}</tbody></table></div>`;
+    el.innerHTML = html;
+    el.querySelectorAll("[data-cc]").forEach(cb => cb.addEventListener("change", () => {
+      const r = (cv.rows || []).find(x => cashKey(x) === cb.dataset.cc);
+      if (r) setCashCollected(r, cb.checked);
+    }));
+  }
+
+  async function setCashCollected(r, on) {
+    const cv = state.cashView;
+    if (!cv || !state.isAdmin || cv.markErrors[r.center]) return;
+    const items = cv.marks[r.center] || (cv.marks[r.center] = {});
+    const prev = items[r.id] || null;
+    const val = on ? { at: Date.now(), by: myEmail() } : null;
+    items[r.id] = val;
+    cv.keep.add(cashKey(r));
+    keepScrollWhile(document.getElementById("cashBox"), renderCashResults);
+    try {
+      await cashCollectRef(r.center).set({ items: { [r.id]: val }, updatedAt: Date.now() }, { merge: true });
+    } catch (e) {
+      if (state.cashView !== cv) return;
+      items[r.id] = prev;
+      keepScrollWhile(document.getElementById("cashBox"), renderCashResults);
+      showToast(e && e.code === "permission-denied" ? "⚠ 권한이 없어 수거 체크를 저장하지 못했어요" : "⚠ 수거 체크를 저장하지 못했어요. 다시 눌러 주세요");
+    }
+  }
+
   // 실시간 이번 주(현재 로드된 명단 기준) 결제완료 합계 — 별도 저장 안 하고 현재 체크 상태 그대로 집계
   function weekRevenueLive() {
     const byMethod = emptyByMethod();
@@ -1896,6 +2138,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     state.extraPayers = {};
     state.ledgerSync = { status: "idle", at: null, message: "" };
     state.ledgerView = null;
+    state.cashView = null;
   }
 
   function saveExtraPayers() {
@@ -2894,6 +3137,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
           <input type="date" class="refdate" id="refDateInput" value="${fmt(state.refDate)}" title="기준일 (보통 오늘)" />
           <button class="btn" id="calendarOpenBtn">📅 학사달력</button>
           <button class="btn" id="ledgerOpenBtn">📒 매출 장부</button>
+          ${state.isAdmin ? `<button class="btn" id="cashCollectOpenBtn">💵 현금 수거</button>` : ``}
           <button class="btn primary" id="uploadBtn">⬆ 명단 업로드</button>
           ${state.activeDay ? `<button class="btn" id="captureBtn">📸 캡처</button><button class="btn" id="printBtn">🖨 인쇄</button>` : ``}
           <button class="btn" id="smsSettingsOpenBtn">⚙ 설정</button>
@@ -3147,6 +3391,8 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       const b = document.getElementById(id);
       if (b) b.addEventListener("click", openLedgerModal);
     });
+    const cashCollectOpenBtn = document.getElementById("cashCollectOpenBtn");
+    if (cashCollectOpenBtn) cashCollectOpenBtn.addEventListener("click", openCashCollect);
 
     const epAddBtn = document.getElementById("epAddBtn");
     if (epAddBtn) epAddBtn.addEventListener("click", () => {
@@ -3871,7 +4117,8 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     const active = document.activeElement;
     const focusSel = active && root.contains(active)
       ? (active.dataset.autosmsid ? `[data-autosmsid="${CSS.escape(active.dataset.autosmsid)}"]`
-        : active.dataset.smsid ? `[data-smsid="${CSS.escape(active.dataset.smsid)}"]` : null)
+        : active.dataset.smsid ? `[data-smsid="${CSS.escape(active.dataset.smsid)}"]`
+        : active.dataset.cc ? `[data-cc="${CSS.escape(active.dataset.cc)}"]` : null)
       : null;
     draw();
     root.querySelectorAll("[data-keep-scroll]").forEach(el => {
@@ -4299,6 +4546,8 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       stopFirestoreSync();
       fbCenter = null;
       state.isAdmin = false;
+      state.cashView = null;
+      closeCashCollect();
       hideCenterScreen();
       showAuthScreen();
       return;
