@@ -475,7 +475,7 @@
   <div id="jpHeader"></div>
   <div class="shell" id="app"></div>
   <script src="https://cooldesign81.github.io/jarada-jpone/shared/jp-header.js?v=1"></script>
-  <script src="https://cooldesign81.github.io/jarada-jpone/shared/jp-login.js?v=1"></script>
+  <script src="https://cooldesign81.github.io/jarada-jpone/shared/jp-login.js?v=2"></script>
 
   <div id="captureModal">
     <div class="capture-box">
@@ -4378,7 +4378,8 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       JPLogin.show({ app: "payment", lead: "JP ONE 직원 계정(관리자)으로 들어와요",
         google: () => fbAuth.signInWithPopup(new firebase.auth.GoogleAuthProvider()),
         common: (em, pw) => fbAuth.signInWithEmailAndPassword(em, pw), commonLabel: "원 공용 계정",
-        denied: d, onSwitch: () => fbAuth.signInWithPopup(pick) });
+        denied: d, onSwitch: () => fbAuth.signInWithPopup(pick),
+        sso: t => fbAuth.signInWithCredential(firebase.auth.GoogleAuthProvider.credential(null, t)) });   // JP ONE 구글 로그인 이어받기
       return;
     }
     document.getElementById("authScreen").classList.add("open");
@@ -4552,6 +4553,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       showAuthScreen();
       return;
     }
+    if (window.JPLogin?.guard && !JPLogin.guard(user, () => fbAuth.signOut())) return;   // JP ONE에서 로그아웃했으면 같이 나감
     state.isAdmin = ADMIN_EMAILS.includes((user.email || "").toLowerCase());
     // 구글 로그인: JP ONE '앱에 명단 보내기'로 받은 명단(payAccess)에 있어야 하고, 적힌 원만 쓸 수 있음
     state.payCenters = null;
