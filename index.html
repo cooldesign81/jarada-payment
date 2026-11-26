@@ -4379,7 +4379,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         google: () => fbAuth.signInWithPopup(new firebase.auth.GoogleAuthProvider()),
         common: (em, pw) => fbAuth.signInWithEmailAndPassword(em, pw), commonLabel: "원 공용 계정",
         denied: d, onSwitch: () => fbAuth.signInWithPopup(pick),
-        sso: t => fbAuth.signInWithCredential(firebase.auth.GoogleAuthProvider.credential(null, t)) });   // JP ONE 구글 로그인 이어받기
+        sso: (t, i) => fbAuth.signInWithCredential(firebase.auth.GoogleAuthProvider.credential(i || null, t)) });   // JP ONE 구글 로그인 이어받기
       return;
     }
     document.getElementById("authScreen").classList.add("open");
