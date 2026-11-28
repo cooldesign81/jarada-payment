@@ -358,7 +358,28 @@
   #stModal { position: fixed; inset: 0; background: rgba(27,42,34,0.55); display: none; align-items: center; justify-content: center; z-index: 999; padding: 20px; }
   #stModal.open { display: flex; }
   #stModal .ledger-box { position: relative; max-height: 92vh; overflow-y: auto; }
-  .st-top { display: grid; grid-template-columns: repeat(3, minmax(110px, 1fr)) minmax(280px, 2fr); gap: 8px; margin: 12px 0; }
+  .st-top { display: grid; grid-template-columns: repeat(4, minmax(100px, 1fr)) minmax(260px, 2fr); gap: 8px; margin: 12px 0; }
+  #stModal .ledger-box { width: 1240px; max-width: 98vw; }
+  .st-cal { border: 1px solid #EEEEEE; border-radius: 10px; padding: 10px; margin-top: 12px; background: #fff; }
+  .st-cal-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .st-cal-head b { font-size: 15px; min-width: 96px; text-align: center; }
+  .st-cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 3px; margin-top: 8px; }
+  .st-cal-w { text-align: center; font-size: 12px; font-weight: 700; color: #767676; }
+  .st-cal-d { min-height: 76px; border: 1px solid #EEEEEE; border-radius: 6px; padding: 3px 4px; background: #fff; overflow: hidden; }
+  .st-cal-d.empty { border: 0; background: none; }
+  .st-cal-d.off { background: #fff5f5; }
+  .st-cal-d.today { outline: 2px solid #DE8619; outline-offset: -2px; }
+  .st-cal-n { font-size: 12px; font-weight: 800; }
+  .st-cal-h { font-size: 10px; color: #b42318; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .st-cal-evs { display: flex; flex-direction: column; gap: 1px; margin-top: 1px; }
+  .st-ev { display: inline-block; font-size: 10.5px; background: #eef4fb; color: #1E3A5F; border-radius: 3px; padding: 0 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .st-ev.last { background: #1E3A5F; color: #fff; }
+  .st-ev.pay { background: #fff1e0; color: #9a5b0a; font-weight: 700; }
+  .st-table th, .st-table td { white-space: nowrap; }
+  .st-stopped td { color: #999; }
+  .st-due { color: #DE8619; }
+  .st-sms-grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 14px; margin-top: 10px; }
+  .cal-item.cal-auto { color: #767676; font-style: italic; }
   .st-stat { background: #fff; border: 1px solid #EEEEEE; border-radius: 8px; padding: 10px 12px; font-size: 13px; }
   .st-stat span { display: block; font-size: 12px; color: #767676; font-weight: 700; }
   .st-stat b { font-size: 20px; color: #222; margin-right: 2px; font-variant-numeric: tabular-nums; }
@@ -382,7 +403,7 @@
   .st-form label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 700; color: #767676; }
   .st-form label.wide { grid-column: 1 / -1; }
   .st-form .st-chk { flex-direction: row; align-items: center; gap: 6px; }
-  @media (max-width: 760px) { .st-top { grid-template-columns: 1fr 1fr; } .st-form { grid-template-columns: 1fr; } }
+  @media (max-width: 760px) { .st-top { grid-template-columns: 1fr 1fr; } .st-form { grid-template-columns: 1fr; } .st-sms-grid { grid-template-columns: 1fr; } .st-cal-d { min-height: 54px; } }
   .ledger-box { width: 1080px; }
   #cashModal {
     position: fixed; inset: 0; background: rgba(27,42,34,0.55); display: none;
@@ -858,11 +879,14 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   function saveCalendar(cal) {
     try { localStorage.setItem(CALENDAR_KEY, JSON.stringify(cal)); } catch (e) {}
     if (fbCenter) centerConfigRef().set({ calendar: cal }, { merge: true }).catch(() => {});
+    if (typeof renderShortTerm === "function") renderShortTerm(); // 단기 수업 달력·일정도 바로 다시 계산
   }
 
   function isBlocked(date, cal) {
     const iso = fmt(date);
     if (cal.holidays.some(h => h.date === iso)) return true;
+    // 토요일이 공휴일이면 그 다음 일요일도 쉼 (주말 수업)
+    if (date.getDay() === 0) { const sat = fmt(addDays(date, -1)); if (cal.holidays.some(h => h.date === sat)) return true; }
     return cal.vacations.some(v => iso >= v.start && iso <= v.end);
   }
 
@@ -1501,10 +1525,12 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   }
 
   // ── 단기 수업 결제 (centers/{원}/shortterm/{코스}) ─────────────────────────────
-  // 단기 수업생은 명단 업로드(정규)에 없어서 따로 관리: 한 번 등록 = 8회 수업, 결제 1번
+  // 단기 수업생은 명단 업로드(정규)에 없어서 따로 관리: 한 번 등록 = 8회 수업(회차 수는 바꿀 수 있음), 결제 1번
   // · 명단: 스케줄 매니저의 '단기' 등록(additions type shortterm)을 자동으로 가져옴 (그 원 스케줄 프로젝트에 구글 계정으로 한 번 연결)
   //         빠진 사람은 '직접 추가'
-  // · 8회 일정: 시작일부터 같은 요일로 8번, 이 앱의 공휴일·원 휴가 + JP ONE 휴원일(스케줄 매니저)을 건너뜀
+  // · 일정: 첫 수업일부터 같은 요일로 회차 수만큼, 학사달력(공휴일·방학)과 JP ONE 휴원일(스케줄 매니저)을 건너뜀
+  //         '연장'(보강 대신 수업 1회 연장)을 누를 때마다 1주 늘어나고 메모에 기록
+  // · 다음 결제일 = 마지막 회차 다음 수업일 (= 다음 텀 시작)
   // · 결제하면 매출 장부에 '단기'로 들어감 (장부 문서 키 "단기:코스ID")
   const ST_SESSIONS = 8;
   const ST_SCHED = {
@@ -1512,46 +1538,79 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     "서초반포원": { key: "banpo", cfg: { apiKey: "AIzaSyALml0ro7SvDL7awn9UlMiFjisx9OiSuXQ", authDomain: "jarada-banpo.firebaseapp.com", projectId: "jarada-banpo", appId: "1:259819249661:web:d5ff6db57196b3f225c394" } },
     "강남대치원": { key: "daechi", cfg: { apiKey: "AIzaSyByg6Wr45wtraJ-uUS0-kLeGRUhiocZ_zo", authDomain: "jarada-daechi.firebaseapp.com", projectId: "jarada-daechi", appId: "1:456067871093:web:90bd5be807ea4942cfa33c" } },
   };
+  const ST_DEFAULT_SMS = `[{센터명}] {이름} 단기 수업 결제 안내\n안녕하세요, {센터명}입니다.\n{이름} 학생의 단기 수업이 {8회차}에 마무리돼요.\n이어서 수업하시려면 {다음결제일}까지 결제 부탁드려요.\n\n다음 텀: {다음텀}\n원비: {원비금액}원\n{지역원계좌정보}`;
   const stWon = (n) => `${(Number(n) || 0).toLocaleString()}원`;
+  const stToday = () => fmt(startOfDay(new Date()));
   function centerShortRef(center) { return fbDb.collection("centers").doc(center || fbCenter).collection("shortterm"); }
-  const st = { center: null, courses: {}, unsub: null, filter: "active", q: "", sched: null, schedUnsubs: [], schedState: "off", schedErr: "", closed: {}, edit: null, pay: null, busy: false, imported: new Set() };
+  const st = { center: null, courses: {}, unsub: null, filter: "active", q: "", sched: null, schedUnsubs: [], schedState: "off", schedErr: "", closed: {}, edit: null, busy: false, imported: new Set(),
+    month: null, calOpen: true, sms: null };
 
   function stApp(center) {
     const m = ST_SCHED[center]; if (!m) return null;
     const name = "sched_" + m.key;
     return firebase.apps.find(a => a.name === name) || firebase.initializeApp(m.cfg, name);
   }
-  // 8회 수업 날짜: 시작일부터 같은 요일, 막힌 날(공휴일·원 휴가·JP ONE 휴원일)은 건너뜀
-  function stSchedule(c) {
+  // 막힌 날: 학사달력(공휴일·방학, 토요일 공휴일이면 일요일도) + JP ONE 휴원일
+  function stBlocked(d) { return isBlocked(d, state.calendar) || !!st.closed[fmt(d)]; }
+  function stBlockLabel(iso) {
+    const cal = state.calendar, h = cal.holidays.find(x => x.date === iso);
+    if (h) return h.label || "공휴일";
+    const d = toDate(iso);
+    if (d && d.getDay() === 0) { const sat = cal.holidays.find(x => x.date === fmt(addDays(d, -1))); if (sat) return `${sat.label || "공휴일"} 다음날`; }
+    const v = cal.vacations.find(x => iso >= x.start && iso <= x.end);
+    if (v) return v.label || "방학";
+    return st.closed[iso] || "";
+  }
+  // 수업 날짜들: 첫 수업일(수업 요일에 맞춤)부터 같은 요일로 (회차 + 연장) 번, 막힌 날은 건너뜀
+  function stFirstDate(c) {
     let start = toDate(c.startDate);
-    if (!start) return [];
-    // 첫 수업일이 수업 요일과 다르면 그 뒤 첫 수업 요일부터 셈
+    if (!start) return null;
     const want = "일월화수목금토".indexOf(c.day || "");
     if (want >= 0) while (start.getDay() !== want) start = addDays(start, 1);
+    return start;
+  }
+  function stDates(c, count) {
+    const start = stFirstDate(c);
+    if (!start) return [];
+    const n = count != null ? count : (Number(c.sessions) || ST_SESSIONS) + (Number(c.extensions) || 0);
     const out = []; let d = start, guard = 0;
-    while (out.length < (Number(c.sessions) || ST_SESSIONS) && guard < 80) {
-      if (!isBlocked(d, state.calendar) && !st.closed[fmt(d)]) out.push(fmt(d));
-      d = addDays(d, 7); guard++;
-    }
+    while (out.length < n && guard < 120) { if (!stBlocked(d)) out.push(fmt(d)); d = addDays(d, 7); guard++; }
     return out;
   }
   function stProgress(c) {
-    const dates = stSchedule(c), today = fmt(startOfDay(new Date()));
-    return { dates, done: dates.filter(x => x < today).length, end: dates[dates.length - 1] || "", next: dates.find(x => x >= today) || "" };
+    const sessions = Number(c.sessions) || ST_SESSIONS;
+    const all = stDates(c, sessions + (Number(c.extensions) || 0) + sessions); // 이번 텀 + 다음 텀까지
+    const n = sessions + (Number(c.extensions) || 0);
+    const dates = all.slice(0, n), next = all.slice(n, n + sessions), today = stToday();
+    const end = dates[dates.length - 1] || "";
+    // 경과: 마지막 회차가 지난 뒤 이어서 등록 안 하고 지나간 수업 주 수
+    const late = end && end < today ? all.slice(n).filter(x => x <= today).length : 0;
+    return { dates, done: dates.filter(x => x < today).length, end, next: dates.find(x => x >= today) || "", payDate: next[0] || "", nextTerm: next, late };
   }
   function stStatus(c) {
     if (c.status === "stopped") return "stopped";
+    if (c.renewedBy) return "done";
     const p = stProgress(c);
-    return p.end && p.end < fmt(startOfDay(new Date())) ? "done" : "active";
+    return p.end && p.end < stToday() ? "done" : "active";
   }
+  // 원비: 직접 고친 금액이 없으면 기본 금액에서 할인(학사 원비 설정의 형제·장기·기타 할인)을 뺌
+  function stTuition(c) {
+    if (c.amount !== undefined && c.amount !== null && c.amount !== "" && c.amountEdited) return Number(c.amount) || 0;
+    const t = state.tuitionSettings || {}, base = Number(state.shortAmount) || 0, d = c.discount || "";
+    const sib = d.includes("형제"), lon = d.includes("장기"), etc = t.etcKeyword && d.includes(t.etcKeyword);
+    const off = sib && lon ? Number(t.both) || 0 : sib ? Number(t.sibling) || 0 : lon ? Number(t.longterm) || 0 : etc ? Number(t.etcAmount) || 0 : 0;
+    return Math.max(0, base - off);
+  }
+  const stAmount = (c) => c.paid ? Number(c.amount) || 0 : stTuition(c);
 
   function openShortTerm() {
     if (!fbCenter) return;
     document.getElementById("stModal").classList.add("open");
+    if (!st.month) st.month = stToday().slice(0, 7);
     if (st.center !== fbCenter) {
       if (st.unsub) st.unsub();
       st.schedUnsubs.forEach(u => u()); st.schedUnsubs = [];
-      Object.assign(st, { center: fbCenter, courses: {}, sched: null, schedState: "off", schedErr: "", closed: {}, imported: new Set() });
+      Object.assign(st, { center: fbCenter, courses: {}, sched: null, schedState: "off", schedErr: "", closed: {}, imported: new Set(), loaded: false, sms: null });
       const center = fbCenter;
       st.unsub = centerShortRef(center).onSnapshot(snap => {
         if (st.center !== center) return;
@@ -1571,7 +1630,6 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     const ready = () => { st.schedState = "on"; st.schedErr = ""; stListenSched(app); renderShortTerm(); };
     if (auth.currentUser) { ready(); return; }
     if (interactive) {
-      // 팝업은 클릭 처리 안에서 바로 열어야 막히지 않음
       const p = new firebase.auth.GoogleAuthProvider();
       const em = fbAuth.currentUser && fbAuth.currentUser.email; if (em) p.setCustomParameters({ login_hint: em });
       auth.signInWithPopup(p).then(ready).catch(e => { st.schedState = "off"; st.schedErr = (e && e.code) || ""; renderShortTerm(); });
@@ -1610,24 +1668,35 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       st.imported.add(a.id);
       batch.set(ref.doc(), {
         name: a.name || "", phone: a.phone || "", age: a.age == null ? "" : String(a.age), day: a.day || "", time: a.time || "",
-        classNo: a.classNo || "", teacher: a.teacher || "", startDate: a.startDate || a.dateISO || "", sessions: ST_SESSIONS,
-        amount: Number(state.shortAmount) || 0, paid: false, status: "active", source: "schedule", schedKey: a.id, memo: "",
+        classNo: a.classNo || "", teacher: a.teacher || "", startDate: a.startDate || a.dateISO || "", sessions: ST_SESSIONS, extensions: 0,
+        discount: "", paid: false, status: "active", source: "schedule", schedKey: a.id, memo: "",
         createdAt: Date.now(), createdBy: by,
       });
     });
     batch.commit().catch(e => { fresh.forEach(a => st.imported.delete(a.id)); console.warn("단기 자동 등록 실패", e); });
   }
 
+  /* ---------- 화면 ---------- */
+  function stRows() {
+    const q = st.q.trim();
+    const all = Object.values(st.courses).filter(c => !c.deleted).map(c => ({ c, s: stStatus(c), p: stProgress(c) }));
+    const list = all.filter(({ c, s }) => (st.filter === "all" || (st.filter === "unpaid" ? !c.paid && s !== "stopped" : st.filter === "due" ? stDueSoon(c) : s === st.filter)) && (!q || String(c.name).includes(q) || String(c.phone || "").includes(q)))
+      .sort((a, b) => ["월", "화", "수", "목", "금", "토", "일"].indexOf(a.c.day) - ["월", "화", "수", "목", "금", "토", "일"].indexOf(b.c.day) || String(a.c.time).localeCompare(String(b.c.time)) || String(a.c.name).localeCompare(String(b.c.name), "ko"));
+    return { all, list };
+  }
+  // 다음 결제일이 2주 안이고 아직 다음 텀을 등록 안 한 사람 (문자 대상 기본값)
+  function stDueSoon(c) {
+    if (c.status === "stopped" || c.renewedBy) return false;
+    const p = stProgress(c);
+    return !!p.payDate && p.payDate <= fmt(addDays(startOfDay(new Date()), 14));
+  }
   function renderShortTerm() {
     const box = document.getElementById("stBox");
     if (!box || !document.getElementById("stModal").classList.contains("open")) return;
-    const today = fmt(startOfDay(new Date())), ym = today.slice(0, 7);
-    const all = Object.values(st.courses).filter(c => !c.deleted).map(c => ({ c, s: stStatus(c), p: stProgress(c) }));
+    const ym = stToday().slice(0, 7);
+    const { all, list } = stRows();
     const schedIds = new Set((st.sched || []).map(a => a.id));
-    const q = st.q.trim();
-    const list = all.filter(({ c, s }) => (st.filter === "all" || (st.filter === "unpaid" ? !c.paid && s !== "stopped" : s === st.filter)) && (!q || String(c.name).includes(q) || String(c.phone || "").includes(q)))
-      .sort((a, b) => (a.c.paid === b.c.paid ? 0 : a.c.paid ? 1 : -1) || String(a.c.startDate).localeCompare(String(b.c.startDate)) || String(a.c.name).localeCompare(String(b.c.name), "ko"));
-    const cnt = (f) => all.filter(({ c, s }) => f === "all" || (f === "unpaid" ? !c.paid && s !== "stopped" : s === f)).length;
+    const cnt = (f) => all.filter(({ c, s }) => f === "all" || (f === "unpaid" ? !c.paid && s !== "stopped" : f === "due" ? stDueSoon(c) : s === f)).length;
     const monthPaid = all.filter(({ c }) => c.paid && String(c.paidDate || "").slice(0, 7) === ym).reduce((n, { c }) => n + (Number(c.amount) || 0), 0);
     const conn = st.schedState === "on" ? `<span class="st-conn on">● 스케줄 매니저 연결됨 · 단기 ${st.sched ? st.sched.length : 0}명</span>`
       : st.schedState === "none" ? `<span class="st-conn">이 원은 스케줄 매니저 연결이 없어요</span>`
@@ -1636,134 +1705,302 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     box.innerHTML = `
       <div class="capture-actions" style="justify-content: space-between; align-items: center;">
         <div class="sms-title">🏃 단기 수업 결제</div>
-        <div style="display:flex; gap:8px;"><button class="btn primary" id="stAddBtn">+ 직접 추가</button><button class="btn ghost" id="stCloseBtn">닫기</button></div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;"><button class="btn primary" id="stAddBtn">+ 직접 추가</button><button class="btn" id="stSmsBtn">💬 문자 보내기</button><button class="btn ghost" id="stCloseBtn">닫기</button></div>
       </div>
+      ${stCalendarHTML()}
       <div class="st-top">
         <div class="st-stat"><span>진행 중</span><b>${cnt("active")}</b>명</div>
         <div class="st-stat warn"><span>미결제</span><b>${cnt("unpaid")}</b>명</div>
+        <div class="st-stat"><span>결제 예정 (2주 안·지남)</span><b>${cnt("due")}</b>명</div>
         <div class="st-stat"><span>이번 달 단기 결제</span><b>${stWon(monthPaid)}</b></div>
         <div class="st-conn-wrap">${conn}
-          <label class="st-amt">기본 금액 <input id="stDefaultAmt" type="number" class="sms-input" min="0" step="1000" value="${Number(state.shortAmount) || ""}" placeholder="예: 400000" /></label></div>
+          <label class="st-amt">단기 기본 원비 <input id="stDefaultAmt" type="number" class="sms-input" min="0" step="1000" value="${Number(state.shortAmount) || ""}" placeholder="예: 400000" /></label></div>
       </div>
       <div class="st-bar">
-        ${[["active", "진행 중"], ["unpaid", "미결제"], ["done", "8회 끝남"], ["stopped", "그만둠"], ["all", "전체"]].map(([k, l]) => `<button class="rq-tab ${st.filter === k ? "active" : ""}" data-stf="${k}">${l} ${cnt(k)}</button>`).join("")}
+        ${[["active", "진행 중"], ["due", "결제 예정"], ["unpaid", "미결제"], ["done", "끝남"], ["stopped", "그만둠"], ["all", "전체"]].map(([k, l]) => `<button class="rq-tab ${st.filter === k ? "active" : ""}" data-stf="${k}">${l} ${cnt(k)}</button>`).join("")}
         <input id="stSearch" class="sms-input" placeholder="이름·연락처 찾기" value="${escapeHtml(st.q)}" style="flex:1; min-width:140px;" />
       </div>
       ${st.loadErr ? `<div class="sms-hint" style="color:#b42318;">단기 명단을 읽지 못했어요 (${escapeHtml(st.loadErr)})</div>` : ""}
-      <div class="lg-table st-table"><table>
-        <thead><tr><th>이름</th><th>수업</th><th>8회 일정</th><th>결제</th><th>메모</th><th></th></tr></thead>
-        <tbody>${list.map(({ c, s, p }) => `<tr class="${s === "stopped" ? "cc-done" : ""}">
-          <td><b>${escapeHtml(c.name)}</b>${c.age ? ` <span class="st-sub">${escapeHtml(c.age)}세</span>` : ""}<div class="st-sub">${escapeHtml(c.phone || "")}</div>
-            ${c.source === "schedule" && st.schedState === "on" && st.sched && !schedIds.has(c.schedKey) && s === "active" ? `<span class="st-tag gray" title="스케줄 매니저에서 단기 등록이 취소됐어요">스케줄에서 빠짐</span>` : ""}${c.source !== "schedule" ? `<span class="st-tag gray">직접 추가</span>` : ""}</td>
-          <td>${escapeHtml(c.day || "-")} ${escapeHtml(c.time || "")}<div class="st-sub">${escapeHtml(c.classNo || "")} ${escapeHtml(c.teacher || "")}</div></td>
-          <td>${p.dates.length ? `${fmtShort(p.dates[0])} ~ ${fmtShort(p.end)}` : "시작일 없음"}<div class="st-sub">${s === "stopped" ? "그만둠" : s === "done" ? "8회 끝남" : `${p.done}/${p.dates.length}회 지남${p.next ? ` · 다음 ${fmtShort(p.next)}` : ""}`}
-            <button class="st-link" data-stdates="${c.id}" title="${escapeHtml(p.dates.map((d, i) => `${i + 1}회 ${d}`).join("\n"))}">일정</button></div></td>
-          <td>${c.paid ? `<span class="st-tag ok">결제 완료</span> <b>${stWon(c.amount)}</b><div class="st-sub">${escapeHtml(c.method || "")} · ${escapeHtml(fmtShort(c.paidDate))}</div>`
-            : `<span class="st-tag warn">미결제</span> ${c.amount ? stWon(c.amount) : ""}`}</td>
-          <td class="st-memo">${escapeHtml(c.memo || "")}</td>
-          <td class="st-acts">${c.paid ? `<button class="btn ghost st-sm" data-stpay="${c.id}">결제 고치기</button>` : `<button class="btn primary st-sm" data-stpay="${c.id}">결제 등록</button>`}
+      <div class="table-card st-table"><div class="table-wrap"><table>
+        <thead><tr><th>NO</th><th>이름</th><th>나이</th><th>교사</th><th>수업시간</th><th>첫 수업</th><th>8회차일</th><th>회차</th><th>경과</th><th>할인</th><th>원비</th>
+          <th class="check-head">결제</th><th>결제방법</th><th>메모</th><th>다음 결제일 · 다음 텀</th><th></th></tr></thead>
+        <tbody>${list.map(({ c, s, p }, i) => {
+          const sess = Number(c.sessions) || ST_SESSIONS, ext = Number(c.extensions) || 0;
+          return `<tr class="${s === "stopped" ? "st-stopped" : ""} ${!c.renewedBy && s !== "stopped" ? rowClass(p.late) : ""}">
+          <td class="no-cell">${i + 1}</td>
+          <td class="name-cell">${escapeHtml(c.name)}<div class="st-sub mono">${escapeHtml(c.phone || "")}</div>
+            ${c.source === "schedule" && st.schedState === "on" && st.sched && !schedIds.has(c.schedKey) && s === "active" ? `<span class="st-tag gray" title="스케줄 매니저에서 단기 등록이 취소됐어요">스케줄에서 빠짐</span>` : ""}${c.source === "manual" ? `<span class="st-tag gray">직접 추가</span>` : ""}${s === "stopped" ? `<span class="st-tag gray">그만둠</span>` : c.renewedBy ? `<span class="st-tag gray">다음 텀 등록함</span>` : ""}</td>
+          <td class="mono">${escapeHtml(c.age || "")}</td>
+          <td>${escapeHtml(c.teacher || "-")}</td>
+          <td class="mono">${escapeHtml(c.day || "")}-${escapeHtml(c.time || "")}</td>
+          <td class="mono">${p.dates[0] ? fmtShort(p.dates[0]) : "-"}</td>
+          <td class="mono">${p.end ? fmtShort(p.end) : "-"}${ext ? `<div class="st-sub">연장 ${ext}주</div>` : ""}</td>
+          <td class="mono"><button class="st-link" data-stdates="${c.id}" title="${escapeHtml(p.dates.map((d, k) => `${k + 1}회 ${d}`).join("\n"))}">${Math.min(p.done + (p.next ? 1 : 0), p.dates.length)}/${sess + ext}</button></td>
+          <td class="mono">${p.late >= 1 && !c.renewedBy ? `${p.late}주` : ""}</td>
+          <td><input class="memo-input st-disc" data-stdisc="${c.id}" value="${escapeHtml(c.discount || "")}" placeholder="-" title="형제·장기 등. 학사 원비 설정의 할인 금액이 빠져요" style="width:56px;" /></td>
+          <td><input class="tuition-input ${c.amountEdited ? "edited" : ""}" data-stamt="${c.id}" type="text" inputmode="decimal" value="${formatManwon(stAmount(c))}" title="눌러서 원비를 고칠 수 있어요. 예: 38 → 38만원. 비우면 기본 원비로" ${c.paid ? "disabled" : ""} /></td>
+          <td><button class="checkbtn ${c.paid ? "on" : ""}" data-stpaid="${c.id}" title="${c.paid ? `결제 ${escapeHtml(c.paidDate || "")} · 누르면 결제 취소` : "누르면 오늘 날짜로 결제"}">${c.paid ? "✓" : ""}</button>${c.paid && c.paidDate ? `<div class="st-sub">${fmtShort(c.paidDate)}</div>` : ""}</td>
+          <td>${paySelectHtml(`data-stmethod="${c.id}"`, c.method || "카드", c.paid, !!c.method)}</td>
+          <td><input class="memo-input" data-stmemo="${c.id}" value="${escapeHtml(c.memo || "")}" style="width:130px;" /></td>
+          <td class="mono">${c.renewedBy || s === "stopped" ? "-" : p.payDate ? `<b class="${stDueSoon(c) ? "st-due" : ""}">${fmtShort(p.payDate)}</b><div class="st-sub">${fmtShort(p.nextTerm[0])}~${fmtShort(p.nextTerm[p.nextTerm.length - 1])}</div>` : "-"}</td>
+          <td class="st-acts"><button class="btn ghost st-sm" data-stext="${c.id}" title="보강 대신 수업을 1주 연장 — 마지막 회차·다음 결제일이 1주 뒤로">+1주 연장</button>
             <button class="btn ghost st-sm" data-stedit="${c.id}">수정</button>
-            ${s === "done" || s === "stopped" ? `<button class="btn ghost st-sm" data-stnext="${c.id}" title="이어서 8회 새로 등록">다음 8회</button>` : ""}</td>
-        </tr>`).join("") || `<tr><td colspan="6" class="ns-empty">${st.loaded ? (q ? "찾는 학생이 없어요." : "해당하는 단기 수업생이 없어요.") : "불러오는 중…"}</td></tr>`}
-        </tbody></table></div>
-      <div class="sms-hint" style="margin-top:10px;">한 번 등록 = ${ST_SESSIONS}회 수업. 공휴일·원 휴가(이 앱 달력)와 JP ONE 휴원일은 건너뛰고 세요. 결제를 등록하면 매출 장부에 ‘단기’로 들어가요(결제일 주차). 스케줄 매니저에서 단기 등록을 취소해도 결제 기록은 지워지지 않아요.</div>
-      ${st.edit ? stEditHTML() : ""}${st.pay ? stPayHTML() : ""}`;
+            ${!c.renewedBy && s !== "stopped" ? `<button class="btn ghost st-sm" data-stnext="${c.id}" title="이어서 다음 텀 등록">다음 텀</button>` : ""}</td>
+        </tr>`; }).join("") || `<tr><td colspan="16" class="ns-empty">${st.loaded ? (st.q.trim() ? "찾는 학생이 없어요." : "해당하는 단기 수업생이 없어요.") : "불러오는 중…"}</td></tr>`}
+        </tbody></table></div></div>
+      <div class="sms-hint" style="margin-top:10px;">한 번 등록 = ${ST_SESSIONS}회 수업. 학사달력의 공휴일·방학(토요일 공휴일이면 그 다음 일요일도)과 JP ONE 휴원일은 건너뛰고 세요. 결제 ✓를 누르면 고른 결제방법·오늘 날짜로 매출 장부에 ‘단기’로 들어가요. ‘+1주 연장’은 보강 대신 수업을 늘려 줄 때 — 마지막 회차와 다음 결제일이 1주 뒤로 가고 메모에 남아요.</div>
+      ${st.edit ? stEditHTML() : ""}${st.sms ? stSmsHTML() : ""}`;
     stBind(box);
   }
+
+  // 달력: 수업 회차·마지막 회차·다음 결제일·학사달력 휴일을 한눈에 (학사달력 설정과 연결)
+  function stCalendarHTML() {
+    const [y, m] = st.month.split("-").map(Number);
+    const first = new Date(y, m - 1, 1), days = new Date(y, m, 0).getDate(), today = stToday();
+    const ev = {};
+    const push = (iso, html) => { (ev[iso] ||= []).push(html); };
+    Object.values(st.courses).filter(c => !c.deleted && c.status !== "stopped").forEach(c => {
+      const p = stProgress(c);
+      p.dates.forEach((d, k) => { if (d.slice(0, 7) === st.month) push(d, `<span class="st-ev ${k === p.dates.length - 1 ? "last" : ""}" title="${escapeHtml(`${c.name} ${c.day}-${c.time} ${k + 1}회${k === p.dates.length - 1 ? " (마지막)" : ""}`)}">${escapeHtml(c.name)} ${k + 1}</span>`); });
+      if (!c.renewedBy && p.payDate && p.payDate.slice(0, 7) === st.month) push(p.payDate, `<span class="st-ev pay" title="${escapeHtml(`${c.name} 다음 결제일`)}">💳 ${escapeHtml(c.name)}</span>`);
+    });
+    let cells = "";
+    for (let i = 0; i < first.getDay(); i++) cells += `<div class="st-cal-d empty"></div>`;
+    for (let d = 1; d <= days; d++) {
+      const iso = `${st.month}-${pad(d)}`, w = new Date(y, m - 1, d).getDay(), blk = stBlockLabel(iso);
+      const items = ev[iso] || [];
+      cells += `<div class="st-cal-d ${iso === today ? "today" : ""} ${blk ? "off" : ""}"><div class="st-cal-n" style="${w === 0 || blk ? "color:#b42318;" : w === 6 ? "color:#1968A1;" : ""}">${d}</div>
+        ${blk ? `<div class="st-cal-h">${escapeHtml(blk)}</div>` : ""}<div class="st-cal-evs">${items.slice(0, 4).join("")}${items.length > 4 ? `<span class="st-sub">+${items.length - 4}</span>` : ""}</div></div>`;
+    }
+    return `<div class="st-cal ${st.calOpen ? "" : "closed"}">
+      <div class="st-cal-head"><button class="btn ghost st-sm" id="stCalToggle">${st.calOpen ? "▾" : "▸"} 달력</button>
+        ${st.calOpen ? `<button class="btn ghost st-sm" id="stCalPrev">◀</button><b>${y}년 ${m}월</b><button class="btn ghost st-sm" id="stCalNext">▶</button><button class="btn ghost st-sm" id="stCalToday">이번 달</button>` : ""}
+        <span class="st-sub" style="margin-left:auto;"><span class="st-ev">이름 n</span> n회차 · <span class="st-ev last">마지막</span> · <span class="st-ev pay">💳 다음 결제일</span> · <b style="color:#b42318;">빨간 날</b> 쉬는 날</span>
+        <button class="btn st-sm" id="stCalLink">📅 학사달력 고치기</button></div>
+      ${st.calOpen ? `<div class="st-cal-grid">${["일", "월", "화", "수", "목", "금", "토"].map((w, i) => `<div class="st-cal-w" style="${i === 0 ? "color:#b42318;" : i === 6 ? "color:#1968A1;" : ""}">${w}</div>`).join("")}${cells}</div>` : ""}
+    </div>`;
+  }
+
   function stEditHTML() {
     const e = st.edit;
     return `<div class="st-pop"><div class="st-pop-box">
-      <div class="sms-title" style="margin-bottom:10px;">${e.id ? "단기 수업생 수정" : e.next ? "다음 8회 등록" : "단기 수업생 직접 추가"}</div>
+      <div class="sms-title" style="margin-bottom:10px;">${e.id ? "단기 수업생 수정" : e.next ? "다음 텀 등록" : "단기 수업생 직접 추가"}</div>
       <div class="st-form">
         <label>이름<input id="stfName" class="sms-input" value="${escapeHtml(e.name || "")}" /></label>
         <label>나이<input id="stfAge" class="sms-input" value="${escapeHtml(e.age || "")}" /></label>
         <label>연락처<input id="stfPhone" class="sms-input" value="${escapeHtml(e.phone || "")}" placeholder="010-0000-0000" /></label>
+        <label>교사<input id="stfTeacher" class="sms-input" value="${escapeHtml(e.teacher || "")}" /></label>
         <label>요일<select id="stfDay" class="sms-input">${["월", "화", "수", "목", "금", "토", "일"].map(d => `<option ${e.day === d ? "selected" : ""}>${d}</option>`).join("")}</select></label>
-        <label>시간<input id="stfTime" class="sms-input" value="${escapeHtml(e.time || "")}" placeholder="15:10" /></label>
-        <label>반·선생님<input id="stfClass" class="sms-input" value="${escapeHtml([e.classNo, e.teacher].filter(Boolean).join(" "))}" /></label>
+        <label>수업시간<input id="stfTime" class="sms-input" value="${escapeHtml(e.time || "")}" placeholder="15:10" /></label>
         <label>첫 수업일<input id="stfStart" type="date" class="sms-input" value="${escapeHtml(e.startDate || "")}" /></label>
-        <label>금액<input id="stfAmount" type="number" class="sms-input" min="0" step="1000" value="${Number(e.amount) || ""}" /></label>
+        <label>회차 (기본 ${ST_SESSIONS}회)<input id="stfSessions" type="number" min="1" max="52" class="sms-input" value="${Number(e.sessions) || ST_SESSIONS}" /></label>
+        <label>연장 (주)<input id="stfExt" type="number" min="0" max="20" class="sms-input" value="${Number(e.extensions) || 0}" /></label>
+        <label>할인<input id="stfDiscount" class="sms-input" value="${escapeHtml(e.discount || "")}" placeholder="형제·장기" /></label>
         <label class="wide">메모<input id="stfMemo" class="sms-input" value="${escapeHtml(e.memo || "")}" /></label>
-        ${e.id ? `<label class="wide st-chk"><input type="checkbox" id="stfStop" ${e.status === "stopped" ? "checked" : ""} /> 그만둠 (목록에서 진행 중으로 안 셈)</label>` : ""}
+        <div class="wide st-sub" id="stfPreview"></div>
+        ${e.id ? `<label class="wide st-chk"><input type="checkbox" id="stfStop" ${e.status === "stopped" ? "checked" : ""} /> 그만둠 (진행 중·결제 예정에서 빠짐)</label>` : ""}
       </div>
       <div style="display:flex; gap:8px; justify-content:space-between; margin-top:12px;">
         <div>${e.id && !e.paid ? `<button class="btn ghost" id="stfDel" style="color:#b42318;">삭제</button>` : ""}</div>
         <div style="display:flex; gap:8px;"><button class="btn ghost" id="stfCancel">취소</button><button class="btn primary" id="stfSave">저장</button></div>
       </div></div></div>`;
   }
-  function stPayHTML() {
-    const c = st.courses[st.pay]; if (!c) return "";
-    return `<div class="st-pop"><div class="st-pop-box" style="width:380px;">
-      <div class="sms-title" style="margin-bottom:6px;">${c.paid ? "결제 고치기" : "결제 등록"} · ${escapeHtml(c.name)}</div>
-      <div class="st-sub" style="margin-bottom:10px;">${escapeHtml(c.day)} ${escapeHtml(c.time)} · ${c.startDate ? `${fmtShort(c.startDate)}부터 ${ST_SESSIONS}회` : ""}</div>
-      <div class="st-form">
-        <label>금액<input id="stpAmount" type="number" class="sms-input" min="0" step="1000" value="${Number(c.amount) || Number(state.shortAmount) || ""}" /></label>
-        <label>결제방법<select id="stpMethod" class="sms-input">${PAY_METHODS.map(m => `<option ${(c.method || "카드") === m ? "selected" : ""}>${m}</option>`).join("")}</select></label>
-        <label>결제일<input id="stpDate" type="date" class="sms-input" value="${escapeHtml(c.paidDate || fmt(startOfDay(new Date())))}" /></label>
-      </div>
-      <div style="display:flex; gap:8px; justify-content:space-between; margin-top:12px;">
-        <div>${c.paid ? `<button class="btn ghost" id="stpUndo" style="color:#b42318;">결제 취소</button>` : ""}</div>
-        <div style="display:flex; gap:8px;"><button class="btn ghost" id="stpCancel">닫기</button><button class="btn primary" id="stpSave">${c.paid ? "저장" : "결제 등록"}</button></div>
+
+  // ── 문자: 다음 결제일 안내 (2주 안 결제 예정자가 기본으로 골라짐) ──
+  function stFill(tpl, c) {
+    const p = stProgress(c), t = state.tuitionSettings || {};
+    return String(tpl || "")
+      .replaceAll("{이름}", cleanNameForSms(c.name || "")).replaceAll("{나이}", String(c.age || "")).replaceAll("{교사}", c.teacher || "")
+      .replaceAll("{요일}", DAY_FULL[c.day] || c.day || "").replaceAll("{수업시간}", c.time || "")
+      .replaceAll("{첫수업}", p.dates[0] ? fmtShort(p.dates[0]) : "-").replaceAll("{8회차}", p.end ? fmtShort(p.end) : "-")
+      .replaceAll("{다음결제일}", p.payDate ? fmtShort(p.payDate) : "-")
+      .replaceAll("{다음텀시작}", p.nextTerm[0] ? fmtShort(p.nextTerm[0]) : "-").replaceAll("{다음텀종료}", p.nextTerm.length ? fmtShort(p.nextTerm[p.nextTerm.length - 1]) : "-")
+      .replaceAll("{다음텀}", p.nextTerm.length ? `${fmtShort(p.nextTerm[0])}~${fmtShort(p.nextTerm[p.nextTerm.length - 1])}` : "-")
+      .replaceAll("{원비금액}", stTuition({ ...c, paid: false }).toLocaleString())
+      .replaceAll("{센터명}", t.name || "학원").replaceAll("{지역원계좌정보}", (t.account && t.account.trim()) || "");
+  }
+  function stSmsOpen() {
+    const sel = {};
+    Object.values(st.courses).forEach(c => { if (!c.deleted && stDueSoon(c) && c.phone) sel[c.id] = true; });
+    st.sms = { tpl: state.shortSmsTemplate || ST_DEFAULT_SMS, title: state.shortSmsTitle || "단기 수업 결제 안내", sel, now: false, date: fmt(startOfDay(new Date())), time: "19:00", sending: false, results: {} };
+    renderShortTerm();
+  }
+  function stSmsHTML() {
+    const S = st.sms;
+    const list = Object.values(st.courses).filter(c => !c.deleted && c.status !== "stopped").sort((a, b) => (stProgress(a).payDate || "9").localeCompare(stProgress(b).payDate || "9"));
+    const first = list.find(c => S.sel[c.id]) || list[0];
+    return `<div class="st-pop"><div class="st-pop-box" style="width:760px;">
+      <div class="capture-actions" style="justify-content:space-between;align-items:center;"><div class="sms-title">💬 단기 수업 문자</div><button class="btn ghost" id="stsClose">닫기</button></div>
+      <div class="st-sms-grid">
+        <div>
+          <input id="stsTitle" class="sms-input" style="width:100%;margin-bottom:6px;" placeholder="제목 (장문 발송 시 필수)" value="${escapeHtml(S.title)}" />
+          <textarea id="stsTpl" class="sms-textarea" rows="10" style="width:100%;">${escapeHtml(S.tpl)}</textarea>
+          <div class="sms-hint">사용 가능한 값: {이름} {나이} {교사} {요일} {수업시간} {첫수업} {8회차} {다음결제일} {다음텀} {다음텀시작} {다음텀종료} {원비금액} {센터명} {지역원계좌정보}</div>
+          <div style="display:flex;gap:6px;margin-top:6px;"><button class="btn ghost st-sm" id="stsReset">기본 문구로</button><button class="btn st-sm" id="stsSave">이 문구 저장</button></div>
+          <div class="sms-section-title" style="margin-top:10px;">미리보기 ${first ? `(${escapeHtml(first.name)})` : ""}</div>
+          <div class="sms-preview">${first ? escapeHtml(stFill(S.tpl, first)) : ""}</div>
+        </div>
+        <div>
+          <div class="sms-section-title">받는 사람 (${list.filter(c => S.sel[c.id]).length}명) <button class="btn ghost st-sm" id="stsAll">전체</button><button class="btn ghost st-sm" id="stsDue">결제 예정만</button><button class="btn ghost st-sm" id="stsNone">해제</button></div>
+          <div class="sms-recipient-list" style="max-height:300px;overflow-y:auto;">${list.map(c => { const p = stProgress(c), r = S.results[c.id]; return `<label class="sms-recipient"><input type="checkbox" data-stssel="${c.id}" ${S.sel[c.id] ? "checked" : ""} ${c.phone ? "" : "disabled"} />
+            <span class="sms-recipient-name">${escapeHtml(c.name)}</span><span class="st-sub">다음 결제 ${p.payDate && !c.renewedBy ? fmtShort(p.payDate) : "-"}</span><span class="sms-recipient-phone mono">${escapeHtml(c.phone || "연락처 없음")}</span>
+            ${r ? (r.ok ? `<span class="sms-result ok">✓ ${escapeHtml(r.info || "등록")}</span>` : `<span class="sms-result fail">✕ ${escapeHtml(r.error)}</span>`) : ""}</label>`; }).join("") || `<div class="sms-hint">단기 수업생이 없어요.</div>`}</div>
+          <label class="sms-testmode" style="margin-top:8px;"><input type="checkbox" id="stsNow" ${S.now ? "checked" : ""} /> 지금 바로 발송 (예약 안 함)</label>
+          <div style="display:flex;gap:6px;margin-top:6px;"><input type="date" id="stsDate" class="sms-input" value="${escapeHtml(S.date)}" ${S.now ? "disabled" : ""} /><input type="time" id="stsTime" class="sms-input" value="${escapeHtml(S.time)}" ${S.now ? "disabled" : ""} /></div>
+          <label class="sms-testmode" style="margin-top:8px;"><input type="checkbox" id="stsTest" ${state.smsTestMode ? "checked" : ""} /> 테스트 모드 (실제 발송 안 됨)</label>
+          <button class="btn primary" id="stsSend" style="width:100%;margin-top:10px;" ${S.sending ? "disabled" : ""}>${S.sending ? "등록 중…" : "발송하기"}</button>
+        </div>
       </div></div></div>`;
   }
+
+  /* ---------- 저장 ---------- */
+  const stUser = () => (fbAuth.currentUser && fbAuth.currentUser.email) || "";
+  async function stPatch(id, patch) { await centerShortRef().doc(id).set({ ...patch, updatedAt: Date.now(), updatedBy: stUser() }, { merge: true }); st.courses[id] = { ...st.courses[id], ...patch }; }
+  async function stTogglePaid(c) {
+    try {
+      if (c.paid) {
+        if (!window.confirm(`${c.name} 단기 결제를 취소할까요?\n매출 장부의 이 기록도 지워져요(장부에서 고친 기록은 숨김 처리).`)) return;
+        await stRemoveLedger(c);
+        await stPatch(c.id, { paid: false, paidDate: "", paidAt: null });
+        showToast("결제를 취소했어요");
+      } else {
+        const patch = { paid: true, amount: stTuition(c), method: c.method || "카드", paidDate: stToday(), paidAt: Date.now(), paidBy: stUser() };
+        await stPatch(c.id, patch);
+        await stWriteLedger({ ...c, ...patch });
+        showToast(`${c.name} ${stWon(patch.amount)} ${patch.method} 결제 — 매출 장부에 ‘단기’로 들어가요`);
+      }
+    } catch (e) { showToast("저장하지 못했어요 (" + ((e && e.code) || "") + ")"); }
+    renderShortTerm();
+  }
+  async function stExtend(c) {
+    const before = stProgress(c);
+    const ext = (Number(c.extensions) || 0) + 1;
+    const after = stProgress({ ...c, extensions: ext });
+    if (!window.confirm(`${c.name} 수업을 1주 연장할까요? (보강 대신)\n\n마지막 회차 ${fmtShort(before.end)} → ${fmtShort(after.end)}\n다음 결제일 ${fmtShort(before.payDate)} → ${fmtShort(after.payDate)}`)) return;
+    const note = `${fmtShort(new Date())} 1주 연장(결제일 ${fmtShort(before.payDate)}→${fmtShort(after.payDate)})`;
+    try {
+      await stPatch(c.id, { extensions: ext, memo: c.memo ? `${c.memo} / ${note}` : note, extLog: [...(c.extLog || []), { at: Date.now(), by: stUser(), from: before.payDate, to: after.payDate }] });
+      if (c.paid) await stWriteLedger({ ...c, extensions: ext });
+      showToast(`1주 연장했어요. 다음 결제일 ${fmtShort(after.payDate)}`);
+    } catch (e) { showToast("저장하지 못했어요"); }
+    renderShortTerm();
+  }
+  function stParseManwon(v) {
+    const t = String(v || "").replace(/[,\s원]/g, "");
+    if (!t) return null;
+    const n = Number(t.replace(/만$/, ""));
+    if (!isFinite(n)) return NaN;
+    return n < 1000 ? Math.round(n * 10000) : Math.round(n);
+  }
+
   function stBind(box) {
     const on = (id, ev, fn) => { const el = box.querySelector("#" + id); if (el) el.addEventListener(ev, fn); };
     on("stCloseBtn", "click", closeShortTerm);
     on("stConnectBtn", "click", () => stConnect(true));
-    on("stAddBtn", "click", () => { st.edit = { day: "월", amount: Number(state.shortAmount) || 0, startDate: fmt(startOfDay(new Date())) }; renderShortTerm(); });
+    on("stSmsBtn", "click", stSmsOpen);
+    on("stAddBtn", "click", () => { st.edit = { day: "월", sessions: ST_SESSIONS, extensions: 0, startDate: stToday() }; renderShortTerm(); });
+    on("stCalToggle", "click", () => { st.calOpen = !st.calOpen; renderShortTerm(); });
+    on("stCalPrev", "click", () => { const d = new Date(st.month + "-01T00:00:00"); d.setMonth(d.getMonth() - 1); st.month = fmt(d).slice(0, 7); renderShortTerm(); });
+    on("stCalNext", "click", () => { const d = new Date(st.month + "-01T00:00:00"); d.setMonth(d.getMonth() + 1); st.month = fmt(d).slice(0, 7); renderShortTerm(); });
+    on("stCalToday", "click", () => { st.month = stToday().slice(0, 7); renderShortTerm(); });
+    on("stCalLink", "click", () => { const m = document.getElementById("calendarModal"); if (m) { m.classList.add("open"); renderCalendarBox(); } });
     on("stSearch", "input", e => { st.q = e.target.value; const pos = e.target.selectionStart; renderShortTerm(); const s = document.getElementById("stSearch"); s.focus(); s.setSelectionRange(pos, pos); });
-    on("stDefaultAmt", "change", e => { state.shortAmount = Number(e.target.value) || 0; centerConfigRef().set({ shortAmount: state.shortAmount }, { merge: true }).then(() => showToast("단기 기본 금액을 저장했어요")).catch(() => showToast("저장하지 못했어요")); });
+    on("stDefaultAmt", "change", e => { state.shortAmount = Number(e.target.value) || 0; centerConfigRef().set({ shortAmount: state.shortAmount }, { merge: true }).then(() => showToast("단기 기본 원비를 저장했어요")).catch(() => showToast("저장하지 못했어요")); renderShortTerm(); });
     box.querySelectorAll("[data-stf]").forEach(b => b.addEventListener("click", () => { st.filter = b.dataset.stf; renderShortTerm(); }));
-    box.querySelectorAll("[data-stpay]").forEach(b => b.addEventListener("click", () => { st.pay = b.dataset.stpay; renderShortTerm(); }));
-    box.querySelectorAll("[data-stedit]").forEach(b => b.addEventListener("click", () => { st.edit = { ...st.courses[b.dataset.stedit] }; renderShortTerm(); }));
-    box.querySelectorAll("[data-stdates]").forEach(b => b.addEventListener("click", () => { const c = st.courses[b.dataset.stdates]; window.alert(`${c.name} · ${ST_SESSIONS}회 일정\n\n${stProgress(c).dates.map((d, i) => `${i + 1}회  ${d} (${"일월화수목금토"[toDate(d).getDay()]})`).join("\n")}\n\n공휴일·원 휴가·JP ONE 휴원일은 건너뛰었어요.`); }));
-    box.querySelectorAll("[data-stnext]").forEach(b => b.addEventListener("click", () => {
-      const c = st.courses[b.dataset.stnext], p = stProgress(c);
-      const after = p.end ? fmt(addDays(toDate(p.end), 7)) : fmt(startOfDay(new Date()));
-      st.edit = { next: true, name: c.name, age: c.age, phone: c.phone, day: c.day, time: c.time, classNo: c.classNo, teacher: c.teacher, startDate: after, amount: c.amount || Number(state.shortAmount) || 0, prevId: c.id };
+    box.querySelectorAll("[data-stpaid]").forEach(b => b.addEventListener("click", () => stTogglePaid(st.courses[b.dataset.stpaid])));
+    box.querySelectorAll("[data-stext]").forEach(b => b.addEventListener("click", () => stExtend(st.courses[b.dataset.stext])));
+    box.querySelectorAll("[data-stmethod]").forEach(sel => sel.addEventListener("change", async () => {
+      const c = st.courses[sel.dataset.stmethod];
+      try { await stPatch(c.id, { method: sel.value }); if (c.paid) await stWriteLedger({ ...c, method: sel.value }); } catch (e) { showToast("저장하지 못했어요"); }
       renderShortTerm();
     }));
-    // 수정·추가 창
+    box.querySelectorAll("[data-stmemo]").forEach(inp => inp.addEventListener("blur", async () => {
+      const c = st.courses[inp.dataset.stmemo]; if ((c.memo || "") === inp.value) return;
+      try { await stPatch(c.id, { memo: inp.value }); if (c.paid) await stWriteLedger({ ...c, memo: inp.value }); } catch (e) { showToast("저장하지 못했어요"); }
+    }));
+    box.querySelectorAll("[data-stdisc]").forEach(inp => inp.addEventListener("blur", async () => {
+      const c = st.courses[inp.dataset.stdisc]; if ((c.discount || "") === inp.value.trim()) return;
+      try { await stPatch(c.id, { discount: inp.value.trim() }); } catch (e) { showToast("저장하지 못했어요"); }
+      renderShortTerm();
+    }));
+    box.querySelectorAll("[data-stamt]").forEach(inp => inp.addEventListener("change", async () => {
+      const c = st.courses[inp.dataset.stamt], v = stParseManwon(inp.value);
+      if (Number.isNaN(v)) { showToast("원비는 숫자로 적어 주세요 (예: 38)"); renderShortTerm(); return; }
+      try { await stPatch(c.id, v === null ? { amount: null, amountEdited: false } : { amount: v, amountEdited: true }); } catch (e) { showToast("저장하지 못했어요"); }
+      renderShortTerm();
+    }));
+    box.querySelectorAll("[data-stedit]").forEach(b => b.addEventListener("click", () => { st.edit = { ...st.courses[b.dataset.stedit] }; renderShortTerm(); }));
+    box.querySelectorAll("[data-stdates]").forEach(b => b.addEventListener("click", () => {
+      const c = st.courses[b.dataset.stdates], p = stProgress(c);
+      window.alert(`${c.name} · ${p.dates.length}회 일정\n\n${p.dates.map((d, i) => `${i + 1}회  ${d} (${"일월화수목금토"[toDate(d).getDay()]})`).join("\n")}\n\n다음 결제일: ${p.payDate || "-"}\n쉬는 날(학사달력·JP ONE 휴원일)은 건너뛰었어요.`);
+    }));
+    box.querySelectorAll("[data-stnext]").forEach(b => b.addEventListener("click", () => {
+      const c = st.courses[b.dataset.stnext], p = stProgress(c);
+      st.edit = { next: true, name: c.name, age: c.age, phone: c.phone, day: c.day, time: c.time, classNo: c.classNo, teacher: c.teacher, discount: c.discount || "", sessions: Number(c.sessions) || ST_SESSIONS, extensions: 0,
+        startDate: p.payDate || stToday(), prevId: c.id, schedKey: c.schedKey || "" };
+      renderShortTerm();
+    }));
+    // 수정·추가 창: 첫 수업일·회차를 넣으면 마지막 회차·다음 결제일을 바로 보여 줌
+    const preview = () => {
+      const el = box.querySelector("#stfPreview"); if (!el) return;
+      const v = (id) => (box.querySelector("#" + id)?.value || "").trim();
+      const c = { startDate: v("stfStart"), day: v("stfDay"), sessions: Number(v("stfSessions")) || ST_SESSIONS, extensions: Number(v("stfExt")) || 0 };
+      const p = stProgress(c);
+      el.innerHTML = p.dates.length ? `📅 첫 수업 <b>${fmtShort(p.dates[0])}</b> · 마지막 ${c.sessions + c.extensions}회차 <b>${fmtShort(p.end)}</b> · 💳 다음 결제일 <b style="color:#DE8619;">${fmtShort(p.payDate)}</b> (쉬는 날 건너뜀)` : "첫 수업일을 넣으면 마지막 회차와 다음 결제일이 나와요.";
+    };
+    ["stfStart", "stfDay", "stfSessions", "stfExt"].forEach(id => { on(id, "input", preview); on(id, "change", preview); });
+    preview();
     on("stfCancel", "click", () => { st.edit = null; renderShortTerm(); });
     on("stfSave", "click", async () => {
       const v = (id) => (box.querySelector("#" + id)?.value || "").trim();
-      const e = st.edit, cls = v("stfClass");
-      const data = { name: v("stfName"), age: v("stfAge"), phone: v("stfPhone"), day: v("stfDay"), time: v("stfTime"), startDate: v("stfStart"), amount: Number(v("stfAmount")) || 0, memo: v("stfMemo"),
-        classNo: e.id && [e.classNo, e.teacher].filter(Boolean).join(" ") === cls ? (e.classNo || "") : cls, teacher: e.id && [e.classNo, e.teacher].filter(Boolean).join(" ") === cls ? (e.teacher || "") : "", updatedAt: Date.now() };
+      const e = st.edit;
+      const data = { name: v("stfName"), age: v("stfAge"), phone: v("stfPhone"), teacher: v("stfTeacher"), day: v("stfDay"), time: v("stfTime"), startDate: v("stfStart"),
+        sessions: Math.max(1, Number(v("stfSessions")) || ST_SESSIONS), extensions: Math.max(0, Number(v("stfExt")) || 0), discount: v("stfDiscount"), memo: v("stfMemo") };
       if (!data.name || !data.startDate) { showToast("이름과 첫 수업일은 꼭 적어 주세요"); return; }
       if (e.id) { const stop = box.querySelector("#stfStop"); data.status = stop && stop.checked ? "stopped" : "active"; }
       try {
-        if (e.id) await centerShortRef().doc(e.id).set(data, { merge: true });
-        else await centerShortRef().add({ ...data, sessions: ST_SESSIONS, paid: false, status: "active", source: e.next ? "next" : "manual", prevId: e.prevId || "", createdAt: Date.now(), createdBy: (fbAuth.currentUser && fbAuth.currentUser.email) || "" });
-        if (e.id && st.courses[e.id]?.paid) await stWriteLedger({ ...st.courses[e.id], ...data });
+        if (e.id) { await stPatch(e.id, data); if (st.courses[e.id]?.paid) await stWriteLedger({ ...st.courses[e.id], ...data }); }
+        else {
+          const ref = await centerShortRef().add({ ...data, classNo: e.classNo || "", paid: false, status: "active", source: e.next ? "next" : "manual", prevId: e.prevId || "", schedKey: e.next ? "" : "", createdAt: Date.now(), createdBy: stUser() });
+          if (e.prevId) await stPatch(e.prevId, { renewedBy: ref.id });
+        }
         st.edit = null; showToast("저장했어요"); renderShortTerm();
       } catch (err) { showToast("저장하지 못했어요 (" + ((err && err.code) || "") + ")"); }
     });
     on("stfDel", "click", async () => {
-      const e = st.edit; if (!e.id || !window.confirm(`${e.name} 단기 등록을 지울까요? (결제 전이라 장부에는 영향 없어요)${e.source === "schedule" ? "\n스케줄 매니저에 단기 등록이 남아 있으면 다시 자동으로 들어오지 않아요." : ""}`)) return;
-      try { if (e.source === "schedule") await centerShortRef().doc(e.id).set({ status: "stopped", deleted: true }, { merge: true }); else await centerShortRef().doc(e.id).delete(); st.edit = null; renderShortTerm(); }
+      const e = st.edit; if (!e.id || !window.confirm(`${e.name} 단기 등록을 지울까요? (결제 전이라 장부에는 영향 없어요)`)) return;
+      try { await stPatch(e.id, { status: "stopped", deleted: true }); st.edit = null; renderShortTerm(); }
       catch (err) { showToast("지우지 못했어요"); }
     });
-    // 결제 창
-    on("stpCancel", "click", () => { st.pay = null; renderShortTerm(); });
-    on("stpSave", "click", async () => {
-      const c = st.courses[st.pay];
-      const amount = Number(box.querySelector("#stpAmount").value) || 0, method = box.querySelector("#stpMethod").value, paidDate = box.querySelector("#stpDate").value;
-      if (!amount || !/^\d{4}-\d{2}-\d{2}$/.test(paidDate)) { showToast("금액과 결제일을 확인해 주세요"); return; }
-      const patch = { paid: true, amount, method, paidDate, paidBy: (fbAuth.currentUser && fbAuth.currentUser.email) || "", paidAt: Date.now() };
-      try {
-        const prev = c.paid ? { ...c } : null;
-        await centerShortRef().doc(c.id).set(patch, { merge: true });
-        await stWriteLedger({ ...c, ...patch }, prev);
-        st.pay = null; showToast(prev ? "결제를 고쳤어요" : "결제를 등록했어요. 매출 장부에 ‘단기’로 들어가요."); renderShortTerm();
-      } catch (err) { showToast("저장하지 못했어요 (" + ((err && err.code) || "") + ")"); }
-    });
-    on("stpUndo", "click", async () => {
-      const c = st.courses[st.pay];
-      if (!window.confirm(`${c.name} 단기 결제를 취소할까요?\n매출 장부의 이 기록도 지워져요(장부에서 고친 기록은 숨김 처리).`)) return;
-      try { await stRemoveLedger(c); await centerShortRef().doc(c.id).set({ paid: false, paidDate: "", method: "", paidAt: null }, { merge: true }); st.pay = null; showToast("결제를 취소했어요"); renderShortTerm(); }
-      catch (err) { showToast("취소하지 못했어요"); }
-    });
+    // 문자 창
+    if (st.sms) {
+      const S = st.sms;
+      on("stsClose", "click", () => { st.sms = null; renderShortTerm(); });
+      on("stsTpl", "input", e => { S.tpl = e.target.value; const pv = box.querySelector(".st-pop .sms-preview"); const list = Object.values(st.courses).filter(c => !c.deleted && c.status !== "stopped"); const f = list.find(c => S.sel[c.id]) || list[0]; if (pv && f) pv.textContent = stFill(S.tpl, f); });
+      on("stsTitle", "input", e => { S.title = e.target.value; });
+      on("stsReset", "click", () => { S.tpl = ST_DEFAULT_SMS; renderShortTerm(); });
+      on("stsSave", "click", () => { state.shortSmsTemplate = S.tpl; state.shortSmsTitle = S.title; centerConfigRef().set({ shortSmsTemplate: S.tpl, shortSmsTitle: S.title }, { merge: true }).then(() => showToast("단기 문자 문구를 저장했어요")).catch(() => showToast("저장하지 못했어요")); });
+      on("stsAll", "click", () => { Object.values(st.courses).forEach(c => { if (!c.deleted && c.status !== "stopped" && c.phone) S.sel[c.id] = true; }); renderShortTerm(); });
+      on("stsDue", "click", () => { S.sel = {}; Object.values(st.courses).forEach(c => { if (!c.deleted && stDueSoon(c) && c.phone) S.sel[c.id] = true; }); renderShortTerm(); });
+      on("stsNone", "click", () => { S.sel = {}; renderShortTerm(); });
+      box.querySelectorAll("[data-stssel]").forEach(cb => cb.addEventListener("change", () => { S.sel[cb.dataset.stssel] = cb.checked; renderShortTerm(); }));
+      on("stsNow", "change", e => { S.now = e.target.checked; renderShortTerm(); });
+      on("stsDate", "change", e => { S.date = e.target.value; });
+      on("stsTime", "change", e => { S.time = e.target.value; });
+      on("stsTest", "change", e => { state.smsTestMode = e.target.checked; });
+      on("stsSend", "click", async () => {
+        const targets = Object.values(st.courses).filter(c => S.sel[c.id] && !c.deleted);
+        if (!targets.length) { showToast("받는 사람을 골라 주세요"); return; }
+        if (!S.now && !S.date) { showToast("예약 날짜를 골라 주세요"); return; }
+        if (!window.confirm(`${targets.length}명에게 ${S.now ? "지금 바로" : `${S.date} ${S.time}에`} 단기 수업 문자를 보낼까요?${state.smsTestMode ? "\n(테스트 모드 — 실제로는 안 가요)" : ""}`)) return;
+        S.sending = true; renderShortTerm();
+        for (const c of targets) S.results[c.id] = await enqueueSms({ name: c.name, phone: c.phone }, stFill(S.tpl, c), S.now ? "" : S.date, S.time, stFill(S.title, c));
+        S.sending = false;
+        const ok = targets.filter(c => S.results[c.id] && S.results[c.id].ok).length;
+        showToast(`${ok}/${targets.length}명 문자를 ${S.now ? "발송 대기열에" : "예약으로"} 등록했어요`);
+        renderShortTerm();
+      });
+    }
   }
   // 매출 장부: 결제일이 속한 주차에 '단기' 1건. 결제일을 바꾸면 예전 주차 기록은 지우고 새로 씀
   function stLedgerId(c, paidDate) { return ledgerDocId(fmt(nextWeekRange(toDate(paidDate)).nextSaturday), "단기:" + c.id); }
@@ -1773,8 +2010,10 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     if (prev && prev.paidDate && prev.paidDate !== c.paidDate) await stRemoveLedger(prev);
     const week = fmt(nextWeekRange(toDate(c.paidDate)).nextSaturday);
     const day = DAY_FULL[c.day] || c.day || "";
-    const row = ledgerRowData({ key: "단기:" + c.id, kind: "단기", category: "", day, name: c.name, age: c.age || "-", teacher: [c.classNo, c.teacher].filter(Boolean).join(" ") || "-",
-      time: c.time || "-", method: c.method || "카드", amount: c.amount, paidDate: c.paidDate, memo: c.memo || "", nextTerm: (() => { const d = stProgress(c).dates; return d.length ? `${fmtShort(d[0])}~${fmtShort(d[d.length - 1])}` : "-"; })() }, week);
+    const p = stProgress(c);
+    const row = ledgerRowData({ key: "단기:" + c.id, kind: "단기", category: "", day, name: c.name, age: c.age || "-", teacher: c.teacher || "-",
+      time: c.time || "-", method: c.method || "카드", amount: c.amount, paidDate: c.paidDate, memo: c.memo || "",
+      nextTerm: p.dates.length ? `${fmtShort(p.dates[0])}~${fmtShort(p.end)}` : "-" }, week);
     await ref.doc(ledgerDocId(week, "단기:" + c.id)).set({ ...row, center: st.center || fbCenter, removed: false, updatedAt: Date.now() }, { merge: true });
   }
   async function stRemoveLedger(c) {
@@ -4333,7 +4572,9 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         <div class="cal-list">
           ${cal.holidays.length === 0 ? `<div class="sms-hint">등록된 공휴일이 없어요.</div>` : cal.holidays
             .sort((a,b) => a.date.localeCompare(b.date))
-            .map((h, idx) => `<div class="cal-item"><span class="mono">${escapeHtml(h.date)}</span><span>${escapeHtml(h.label || "")}</span><button class="cal-del" data-hidx="${escapeHtml(h.date)}">✕</button></div>`)
+            .map((h, idx) => `<div class="cal-item"><span class="mono">${escapeHtml(h.date)}</span><span>${escapeHtml(h.label || "")}</span><button class="cal-del" data-hidx="${escapeHtml(h.date)}">✕</button></div>`
+              + (toDate(h.date) && toDate(h.date).getDay() === 6 && !cal.holidays.some(x => x.date === fmt(addDays(toDate(h.date), 1)))
+                ? `<div class="cal-item cal-auto" title="토요일이 공휴일이면 다음 날 일요일도 자동으로 쉬어요"><span class="mono">${escapeHtml(fmt(addDays(toDate(h.date), 1)))}</span><span>${escapeHtml(h.label || "공휴일")} 다음날 (일요일 · 자동)</span><span></span></div>` : ""))
             .join("")}
         </div>
       </div>
@@ -4355,6 +4596,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         </div>
       </div>
       <div class="sms-hint">공휴일 일괄추가: 2026~2030년 양력 고정 공휴일(신정·삼일절·어린이날·현충일·제헌절·광복절·개천절·한글날·성탄절, 대체공휴일 포함)이 자동 계산돼요. 음력 명절(설날·추석·부처님오신날)은 2026~2028년까지만 확정 날짜가 있고, 2029~2030년은 아직 공식 확정 전이라 비어있어요 — 날짜 나오면 위에서 직접 추가해 주세요.</div>
+      <div class="sms-hint">토요일이 공휴일이면 그 다음 일요일도 자동으로 쉬는 날이 돼요(목록에 '자동'으로 표시).</div>
       <div class="sms-hint">여기 등록된 날짜는 '다음 텀' 계산에서 자동으로 건너뛰어요. 학생 목록의 '다음 텀' 열과 문자 발송의 {다음텀시작}/{다음텀종료} 값에 바로 반영돼요.</div>
     `;
     box.innerHTML = html;
@@ -4803,6 +5045,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       if (data.tuitionSettings) state.tuitionSettings = { ...DEFAULT_TUITION_SETTINGS, ...data.tuitionSettings };
       if (data.calendar) state.calendar = data.calendar;
       state.shortAmount = Number(data.shortAmount) || 0; // 단기 수업 기본 금액
+      state.shortSmsTemplate = data.shortSmsTemplate || ""; state.shortSmsTitle = data.shortSmsTitle || "";
       if (data.smsSettings) state.smsSettings = data.smsSettings;
       state.autoReminder = { ...DEFAULT_AUTO_REMINDER, ...(data.autoReminder || {}) };
       state.autoReminderServer = data.autoReminderServer || null;
