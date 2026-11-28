@@ -355,6 +355,34 @@
     align-items: center; justify-content: center; z-index: 999; padding: 20px;
   }
   #ledgerModal.open { display: flex; }
+  #stModal { position: fixed; inset: 0; background: rgba(27,42,34,0.55); display: none; align-items: center; justify-content: center; z-index: 999; padding: 20px; }
+  #stModal.open { display: flex; }
+  #stModal .ledger-box { position: relative; max-height: 92vh; overflow-y: auto; }
+  .st-top { display: grid; grid-template-columns: repeat(3, minmax(110px, 1fr)) minmax(280px, 2fr); gap: 8px; margin: 12px 0; }
+  .st-stat { background: #fff; border: 1px solid #EEEEEE; border-radius: 8px; padding: 10px 12px; font-size: 13px; }
+  .st-stat span { display: block; font-size: 12px; color: #767676; font-weight: 700; }
+  .st-stat b { font-size: 20px; color: #222; margin-right: 2px; font-variant-numeric: tabular-nums; }
+  .st-stat.warn b { color: #b42318; }
+  .st-conn-wrap { display: flex; flex-direction: column; gap: 6px; justify-content: center; font-size: 12px; }
+  .st-conn { font-size: 12px; color: #767676; } .st-conn.on { color: #1a7f37; font-weight: 700; } .st-conn.err { color: #b42318; }
+  .st-amt { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; color: #4E4E4E; }
+  .st-amt input { width: 130px; }
+  .st-bar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+  .st-table td { vertical-align: top; font-size: 13px; }
+  .st-sub { font-size: 11.5px; color: #767676; }
+  .st-tag { display: inline-block; font-size: 11px; font-weight: 800; border-radius: 4px; padding: 1px 6px; }
+  .st-tag.ok { background: #e6f4ea; color: #1a7f37; } .st-tag.warn { background: #fdecea; color: #b42318; } .st-tag.gray { background: #eee; color: #666; margin-top: 3px; }
+  .st-link { border: 0; background: none; color: #DE8619; font-size: 11.5px; cursor: pointer; padding: 0 2px; text-decoration: underline; }
+  .st-memo { max-width: 180px; font-size: 12px; color: #4E4E4E; }
+  .st-acts { white-space: nowrap; text-align: right; }
+  .st-sm { padding: 5px 9px !important; font-size: 12px !important; }
+  .st-pop { position: fixed; inset: 0; background: rgba(0,0,0,.35); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+  .st-pop-box { background: #fff; border-radius: 10px; padding: 18px; width: 520px; max-width: 94vw; box-shadow: 0 10px 30px rgba(0,0,0,.2); }
+  .st-form { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 10px; }
+  .st-form label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 700; color: #767676; }
+  .st-form label.wide { grid-column: 1 / -1; }
+  .st-form .st-chk { flex-direction: row; align-items: center; gap: 6px; }
+  @media (max-width: 760px) { .st-top { grid-template-columns: 1fr 1fr; } .st-form { grid-template-columns: 1fr; } }
   .ledger-box { width: 1080px; }
   #cashModal {
     position: fixed; inset: 0; background: rgba(27,42,34,0.55); display: none;
@@ -508,6 +536,9 @@
 
   <div id="ledgerModal">
     <div class="capture-box ledger-box" id="ledgerBox"></div>
+  </div>
+  <div id="stModal">
+    <div class="capture-box ledger-box" id="stBox"></div>
   </div>
 
   <div id="cashModal">
@@ -1338,7 +1369,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   }
 
   // ---- 매출 장부 보기 (필터 · 묶어 보기 · 엑셀 저장) ----
-  const LEDGER_KIND_OPTIONS = ["정규", "신규생", "샘플 후 등록", "다른 요일", "기타", "상자"];
+  const LEDGER_KIND_OPTIONS = ["정규", "신규생", "샘플 후 등록", "다른 요일", "기타", "상자", "단기"];
   // 구분 필터: 묶음 선택 + 하나씩 선택
   const LEDGER_KIND_FILTERS = [
     { value: "정규+신규생+다른 요일", label: "정규 + 신규생 + 다른 요일", kinds: ["정규", "신규생", "다른 요일"] },
@@ -1467,6 +1498,291 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     return Array.from(map.values()).map(g => ({ ...g, ...sumLedger(g.rows) })).sort((a, b) =>
       (group === "kind" || group === "center" ? order(a) - order(b) : dir * a.label.localeCompare(b.label)) ||
       CENTER_LIST.indexOf(a.center) - CENTER_LIST.indexOf(b.center));
+  }
+
+  // ── 단기 수업 결제 (centers/{원}/shortterm/{코스}) ─────────────────────────────
+  // 단기 수업생은 명단 업로드(정규)에 없어서 따로 관리: 한 번 등록 = 8회 수업, 결제 1번
+  // · 명단: 스케줄 매니저의 '단기' 등록(additions type shortterm)을 자동으로 가져옴 (그 원 스케줄 프로젝트에 구글 계정으로 한 번 연결)
+  //         빠진 사람은 '직접 추가'
+  // · 8회 일정: 시작일부터 같은 요일로 8번, 이 앱의 공휴일·원 휴가 + JP ONE 휴원일(스케줄 매니저)을 건너뜀
+  // · 결제하면 매출 장부에 '단기'로 들어감 (장부 문서 키 "단기:코스ID")
+  const ST_SESSIONS = 8;
+  const ST_SCHED = {
+    "안양평촌원": { key: "pyeongchon", cfg: { apiKey: "AIzaSyCloEOVFM8x1WPYXc0xcL175zBfWkq9NCg", authDomain: "jarada-pyeongchon.firebaseapp.com", projectId: "jarada-pyeongchon", appId: "1:486231973508:web:0f7ec0eb9e44786af3acd1" } },
+    "서초반포원": { key: "banpo", cfg: { apiKey: "AIzaSyALml0ro7SvDL7awn9UlMiFjisx9OiSuXQ", authDomain: "jarada-banpo.firebaseapp.com", projectId: "jarada-banpo", appId: "1:259819249661:web:d5ff6db57196b3f225c394" } },
+    "강남대치원": { key: "daechi", cfg: { apiKey: "AIzaSyByg6Wr45wtraJ-uUS0-kLeGRUhiocZ_zo", authDomain: "jarada-daechi.firebaseapp.com", projectId: "jarada-daechi", appId: "1:456067871093:web:90bd5be807ea4942cfa33c" } },
+  };
+  const stWon = (n) => `${(Number(n) || 0).toLocaleString()}원`;
+  function centerShortRef(center) { return fbDb.collection("centers").doc(center || fbCenter).collection("shortterm"); }
+  const st = { center: null, courses: {}, unsub: null, filter: "active", q: "", sched: null, schedUnsubs: [], schedState: "off", schedErr: "", closed: {}, edit: null, pay: null, busy: false, imported: new Set() };
+
+  function stApp(center) {
+    const m = ST_SCHED[center]; if (!m) return null;
+    const name = "sched_" + m.key;
+    return firebase.apps.find(a => a.name === name) || firebase.initializeApp(m.cfg, name);
+  }
+  // 8회 수업 날짜: 시작일부터 같은 요일, 막힌 날(공휴일·원 휴가·JP ONE 휴원일)은 건너뜀
+  function stSchedule(c) {
+    let start = toDate(c.startDate);
+    if (!start) return [];
+    // 첫 수업일이 수업 요일과 다르면 그 뒤 첫 수업 요일부터 셈
+    const want = "일월화수목금토".indexOf(c.day || "");
+    if (want >= 0) while (start.getDay() !== want) start = addDays(start, 1);
+    const out = []; let d = start, guard = 0;
+    while (out.length < (Number(c.sessions) || ST_SESSIONS) && guard < 80) {
+      if (!isBlocked(d, state.calendar) && !st.closed[fmt(d)]) out.push(fmt(d));
+      d = addDays(d, 7); guard++;
+    }
+    return out;
+  }
+  function stProgress(c) {
+    const dates = stSchedule(c), today = fmt(startOfDay(new Date()));
+    return { dates, done: dates.filter(x => x < today).length, end: dates[dates.length - 1] || "", next: dates.find(x => x >= today) || "" };
+  }
+  function stStatus(c) {
+    if (c.status === "stopped") return "stopped";
+    const p = stProgress(c);
+    return p.end && p.end < fmt(startOfDay(new Date())) ? "done" : "active";
+  }
+
+  function openShortTerm() {
+    if (!fbCenter) return;
+    document.getElementById("stModal").classList.add("open");
+    if (st.center !== fbCenter) {
+      if (st.unsub) st.unsub();
+      st.schedUnsubs.forEach(u => u()); st.schedUnsubs = [];
+      Object.assign(st, { center: fbCenter, courses: {}, sched: null, schedState: "off", schedErr: "", closed: {}, imported: new Set() });
+      const center = fbCenter;
+      st.unsub = centerShortRef(center).onSnapshot(snap => {
+        if (st.center !== center) return;
+        const m = {}; snap.forEach(d => { m[d.id] = { id: d.id, ...d.data() }; });
+        st.courses = m; st.loaded = true; stAutoImport(); renderShortTerm();
+      }, e => { st.loadErr = (e && e.code) || String(e); renderShortTerm(); });
+      stConnect(false);
+    }
+    renderShortTerm();
+  }
+  function closeShortTerm() { document.getElementById("stModal").classList.remove("open"); }
+
+  // 스케줄 매니저 연결: 저장된 로그인 → JP ONE 구글 로그인 이어받기 → (버튼을 눌렀을 때만) 구글 창
+  function stConnect(interactive) {
+    const app = stApp(fbCenter); if (!app) { st.schedState = "none"; return; }
+    const auth = app.auth();
+    const ready = () => { st.schedState = "on"; st.schedErr = ""; stListenSched(app); renderShortTerm(); };
+    if (auth.currentUser) { ready(); return; }
+    if (interactive) {
+      // 팝업은 클릭 처리 안에서 바로 열어야 막히지 않음
+      const p = new firebase.auth.GoogleAuthProvider();
+      const em = fbAuth.currentUser && fbAuth.currentUser.email; if (em) p.setCustomParameters({ login_hint: em });
+      auth.signInWithPopup(p).then(ready).catch(e => { st.schedState = "off"; st.schedErr = (e && e.code) || ""; renderShortTerm(); });
+      return;
+    }
+    st.schedState = "wait";
+    const unsub = auth.onAuthStateChanged(u => {
+      unsub();
+      if (u) { ready(); return; }
+      const t = window.JPLogin && JPLogin.token ? JPLogin.token() : "";
+      if (t) auth.signInWithCredential(firebase.auth.GoogleAuthProvider.credential((JPLogin.idToken && JPLogin.idToken()) || null, t)).then(ready).catch(() => { st.schedState = "off"; renderShortTerm(); });
+      else { st.schedState = "off"; renderShortTerm(); }
+    });
+  }
+  function stListenSched(app) {
+    st.schedUnsubs.forEach(u => u()); st.schedUnsubs = [];
+    const db = app.firestore(), center = fbCenter;
+    st.schedUnsubs.push(db.collection("additions").where("type", "==", "shortterm").onSnapshot(snap => {
+      if (st.center !== center) return;
+      st.sched = []; snap.forEach(d => st.sched.push({ id: d.id, ...d.data() }));
+      stAutoImport(); renderShortTerm();
+    }, e => { st.schedState = "err"; st.schedErr = (e && e.code) || String(e); renderShortTerm(); }));
+    st.schedUnsubs.push(db.collection("settings").doc("closedDays").onSnapshot(d => {
+      st.closed = (d.exists && d.data().days) || {}; renderShortTerm();
+    }, () => {}));
+  }
+  // 스케줄에 새로 생긴 단기 등록은 자동으로 코스를 만듦 (같은 등록은 한 번만)
+  function stAutoImport() {
+    if (!st.loaded || !Array.isArray(st.sched) || st.busy) return;
+    const have = new Set(Object.values(st.courses).map(c => c.schedKey).filter(Boolean));
+    const fresh = st.sched.filter(a => !have.has(a.id) && !st.imported.has(a.id));
+    if (!fresh.length) return;
+    const ref = centerShortRef(st.center), by = (fbAuth.currentUser && fbAuth.currentUser.email) || "";
+    const batch = fbDb.batch();
+    fresh.forEach(a => {
+      st.imported.add(a.id);
+      batch.set(ref.doc(), {
+        name: a.name || "", phone: a.phone || "", age: a.age == null ? "" : String(a.age), day: a.day || "", time: a.time || "",
+        classNo: a.classNo || "", teacher: a.teacher || "", startDate: a.startDate || a.dateISO || "", sessions: ST_SESSIONS,
+        amount: Number(state.shortAmount) || 0, paid: false, status: "active", source: "schedule", schedKey: a.id, memo: "",
+        createdAt: Date.now(), createdBy: by,
+      });
+    });
+    batch.commit().catch(e => { fresh.forEach(a => st.imported.delete(a.id)); console.warn("단기 자동 등록 실패", e); });
+  }
+
+  function renderShortTerm() {
+    const box = document.getElementById("stBox");
+    if (!box || !document.getElementById("stModal").classList.contains("open")) return;
+    const today = fmt(startOfDay(new Date())), ym = today.slice(0, 7);
+    const all = Object.values(st.courses).filter(c => !c.deleted).map(c => ({ c, s: stStatus(c), p: stProgress(c) }));
+    const schedIds = new Set((st.sched || []).map(a => a.id));
+    const q = st.q.trim();
+    const list = all.filter(({ c, s }) => (st.filter === "all" || (st.filter === "unpaid" ? !c.paid && s !== "stopped" : s === st.filter)) && (!q || String(c.name).includes(q) || String(c.phone || "").includes(q)))
+      .sort((a, b) => (a.c.paid === b.c.paid ? 0 : a.c.paid ? 1 : -1) || String(a.c.startDate).localeCompare(String(b.c.startDate)) || String(a.c.name).localeCompare(String(b.c.name), "ko"));
+    const cnt = (f) => all.filter(({ c, s }) => f === "all" || (f === "unpaid" ? !c.paid && s !== "stopped" : s === f)).length;
+    const monthPaid = all.filter(({ c }) => c.paid && String(c.paidDate || "").slice(0, 7) === ym).reduce((n, { c }) => n + (Number(c.amount) || 0), 0);
+    const conn = st.schedState === "on" ? `<span class="st-conn on">● 스케줄 매니저 연결됨 · 단기 ${st.sched ? st.sched.length : 0}명</span>`
+      : st.schedState === "none" ? `<span class="st-conn">이 원은 스케줄 매니저 연결이 없어요</span>`
+      : st.schedState === "wait" ? `<span class="st-conn">스케줄 매니저 연결 중…</span>`
+      : `<button class="btn" id="stConnectBtn">🔗 스케줄 매니저 연결</button>${st.schedErr ? `<span class="st-conn err">연결 실패 (${escapeHtml(st.schedErr)})</span>` : `<span class="st-conn">연결하면 스케줄의 '단기' 등록이 자동으로 들어와요</span>`}`;
+    box.innerHTML = `
+      <div class="capture-actions" style="justify-content: space-between; align-items: center;">
+        <div class="sms-title">🏃 단기 수업 결제</div>
+        <div style="display:flex; gap:8px;"><button class="btn primary" id="stAddBtn">+ 직접 추가</button><button class="btn ghost" id="stCloseBtn">닫기</button></div>
+      </div>
+      <div class="st-top">
+        <div class="st-stat"><span>진행 중</span><b>${cnt("active")}</b>명</div>
+        <div class="st-stat warn"><span>미결제</span><b>${cnt("unpaid")}</b>명</div>
+        <div class="st-stat"><span>이번 달 단기 결제</span><b>${stWon(monthPaid)}</b></div>
+        <div class="st-conn-wrap">${conn}
+          <label class="st-amt">기본 금액 <input id="stDefaultAmt" type="number" class="sms-input" min="0" step="1000" value="${Number(state.shortAmount) || ""}" placeholder="예: 400000" /></label></div>
+      </div>
+      <div class="st-bar">
+        ${[["active", "진행 중"], ["unpaid", "미결제"], ["done", "8회 끝남"], ["stopped", "그만둠"], ["all", "전체"]].map(([k, l]) => `<button class="rq-tab ${st.filter === k ? "active" : ""}" data-stf="${k}">${l} ${cnt(k)}</button>`).join("")}
+        <input id="stSearch" class="sms-input" placeholder="이름·연락처 찾기" value="${escapeHtml(st.q)}" style="flex:1; min-width:140px;" />
+      </div>
+      ${st.loadErr ? `<div class="sms-hint" style="color:#b42318;">단기 명단을 읽지 못했어요 (${escapeHtml(st.loadErr)})</div>` : ""}
+      <div class="lg-table st-table"><table>
+        <thead><tr><th>이름</th><th>수업</th><th>8회 일정</th><th>결제</th><th>메모</th><th></th></tr></thead>
+        <tbody>${list.map(({ c, s, p }) => `<tr class="${s === "stopped" ? "cc-done" : ""}">
+          <td><b>${escapeHtml(c.name)}</b>${c.age ? ` <span class="st-sub">${escapeHtml(c.age)}세</span>` : ""}<div class="st-sub">${escapeHtml(c.phone || "")}</div>
+            ${c.source === "schedule" && st.schedState === "on" && st.sched && !schedIds.has(c.schedKey) && s === "active" ? `<span class="st-tag gray" title="스케줄 매니저에서 단기 등록이 취소됐어요">스케줄에서 빠짐</span>` : ""}${c.source !== "schedule" ? `<span class="st-tag gray">직접 추가</span>` : ""}</td>
+          <td>${escapeHtml(c.day || "-")} ${escapeHtml(c.time || "")}<div class="st-sub">${escapeHtml(c.classNo || "")} ${escapeHtml(c.teacher || "")}</div></td>
+          <td>${p.dates.length ? `${fmtShort(p.dates[0])} ~ ${fmtShort(p.end)}` : "시작일 없음"}<div class="st-sub">${s === "stopped" ? "그만둠" : s === "done" ? "8회 끝남" : `${p.done}/${p.dates.length}회 지남${p.next ? ` · 다음 ${fmtShort(p.next)}` : ""}`}
+            <button class="st-link" data-stdates="${c.id}" title="${escapeHtml(p.dates.map((d, i) => `${i + 1}회 ${d}`).join("\n"))}">일정</button></div></td>
+          <td>${c.paid ? `<span class="st-tag ok">결제 완료</span> <b>${stWon(c.amount)}</b><div class="st-sub">${escapeHtml(c.method || "")} · ${escapeHtml(fmtShort(c.paidDate))}</div>`
+            : `<span class="st-tag warn">미결제</span> ${c.amount ? stWon(c.amount) : ""}`}</td>
+          <td class="st-memo">${escapeHtml(c.memo || "")}</td>
+          <td class="st-acts">${c.paid ? `<button class="btn ghost st-sm" data-stpay="${c.id}">결제 고치기</button>` : `<button class="btn primary st-sm" data-stpay="${c.id}">결제 등록</button>`}
+            <button class="btn ghost st-sm" data-stedit="${c.id}">수정</button>
+            ${s === "done" || s === "stopped" ? `<button class="btn ghost st-sm" data-stnext="${c.id}" title="이어서 8회 새로 등록">다음 8회</button>` : ""}</td>
+        </tr>`).join("") || `<tr><td colspan="6" class="ns-empty">${st.loaded ? (q ? "찾는 학생이 없어요." : "해당하는 단기 수업생이 없어요.") : "불러오는 중…"}</td></tr>`}
+        </tbody></table></div>
+      <div class="sms-hint" style="margin-top:10px;">한 번 등록 = ${ST_SESSIONS}회 수업. 공휴일·원 휴가(이 앱 달력)와 JP ONE 휴원일은 건너뛰고 세요. 결제를 등록하면 매출 장부에 ‘단기’로 들어가요(결제일 주차). 스케줄 매니저에서 단기 등록을 취소해도 결제 기록은 지워지지 않아요.</div>
+      ${st.edit ? stEditHTML() : ""}${st.pay ? stPayHTML() : ""}`;
+    stBind(box);
+  }
+  function stEditHTML() {
+    const e = st.edit;
+    return `<div class="st-pop"><div class="st-pop-box">
+      <div class="sms-title" style="margin-bottom:10px;">${e.id ? "단기 수업생 수정" : e.next ? "다음 8회 등록" : "단기 수업생 직접 추가"}</div>
+      <div class="st-form">
+        <label>이름<input id="stfName" class="sms-input" value="${escapeHtml(e.name || "")}" /></label>
+        <label>나이<input id="stfAge" class="sms-input" value="${escapeHtml(e.age || "")}" /></label>
+        <label>연락처<input id="stfPhone" class="sms-input" value="${escapeHtml(e.phone || "")}" placeholder="010-0000-0000" /></label>
+        <label>요일<select id="stfDay" class="sms-input">${["월", "화", "수", "목", "금", "토", "일"].map(d => `<option ${e.day === d ? "selected" : ""}>${d}</option>`).join("")}</select></label>
+        <label>시간<input id="stfTime" class="sms-input" value="${escapeHtml(e.time || "")}" placeholder="15:10" /></label>
+        <label>반·선생님<input id="stfClass" class="sms-input" value="${escapeHtml([e.classNo, e.teacher].filter(Boolean).join(" "))}" /></label>
+        <label>첫 수업일<input id="stfStart" type="date" class="sms-input" value="${escapeHtml(e.startDate || "")}" /></label>
+        <label>금액<input id="stfAmount" type="number" class="sms-input" min="0" step="1000" value="${Number(e.amount) || ""}" /></label>
+        <label class="wide">메모<input id="stfMemo" class="sms-input" value="${escapeHtml(e.memo || "")}" /></label>
+        ${e.id ? `<label class="wide st-chk"><input type="checkbox" id="stfStop" ${e.status === "stopped" ? "checked" : ""} /> 그만둠 (목록에서 진행 중으로 안 셈)</label>` : ""}
+      </div>
+      <div style="display:flex; gap:8px; justify-content:space-between; margin-top:12px;">
+        <div>${e.id && !e.paid ? `<button class="btn ghost" id="stfDel" style="color:#b42318;">삭제</button>` : ""}</div>
+        <div style="display:flex; gap:8px;"><button class="btn ghost" id="stfCancel">취소</button><button class="btn primary" id="stfSave">저장</button></div>
+      </div></div></div>`;
+  }
+  function stPayHTML() {
+    const c = st.courses[st.pay]; if (!c) return "";
+    return `<div class="st-pop"><div class="st-pop-box" style="width:380px;">
+      <div class="sms-title" style="margin-bottom:6px;">${c.paid ? "결제 고치기" : "결제 등록"} · ${escapeHtml(c.name)}</div>
+      <div class="st-sub" style="margin-bottom:10px;">${escapeHtml(c.day)} ${escapeHtml(c.time)} · ${c.startDate ? `${fmtShort(c.startDate)}부터 ${ST_SESSIONS}회` : ""}</div>
+      <div class="st-form">
+        <label>금액<input id="stpAmount" type="number" class="sms-input" min="0" step="1000" value="${Number(c.amount) || Number(state.shortAmount) || ""}" /></label>
+        <label>결제방법<select id="stpMethod" class="sms-input">${PAY_METHODS.map(m => `<option ${(c.method || "카드") === m ? "selected" : ""}>${m}</option>`).join("")}</select></label>
+        <label>결제일<input id="stpDate" type="date" class="sms-input" value="${escapeHtml(c.paidDate || fmt(startOfDay(new Date())))}" /></label>
+      </div>
+      <div style="display:flex; gap:8px; justify-content:space-between; margin-top:12px;">
+        <div>${c.paid ? `<button class="btn ghost" id="stpUndo" style="color:#b42318;">결제 취소</button>` : ""}</div>
+        <div style="display:flex; gap:8px;"><button class="btn ghost" id="stpCancel">닫기</button><button class="btn primary" id="stpSave">${c.paid ? "저장" : "결제 등록"}</button></div>
+      </div></div></div>`;
+  }
+  function stBind(box) {
+    const on = (id, ev, fn) => { const el = box.querySelector("#" + id); if (el) el.addEventListener(ev, fn); };
+    on("stCloseBtn", "click", closeShortTerm);
+    on("stConnectBtn", "click", () => stConnect(true));
+    on("stAddBtn", "click", () => { st.edit = { day: "월", amount: Number(state.shortAmount) || 0, startDate: fmt(startOfDay(new Date())) }; renderShortTerm(); });
+    on("stSearch", "input", e => { st.q = e.target.value; const pos = e.target.selectionStart; renderShortTerm(); const s = document.getElementById("stSearch"); s.focus(); s.setSelectionRange(pos, pos); });
+    on("stDefaultAmt", "change", e => { state.shortAmount = Number(e.target.value) || 0; centerConfigRef().set({ shortAmount: state.shortAmount }, { merge: true }).then(() => showToast("단기 기본 금액을 저장했어요")).catch(() => showToast("저장하지 못했어요")); });
+    box.querySelectorAll("[data-stf]").forEach(b => b.addEventListener("click", () => { st.filter = b.dataset.stf; renderShortTerm(); }));
+    box.querySelectorAll("[data-stpay]").forEach(b => b.addEventListener("click", () => { st.pay = b.dataset.stpay; renderShortTerm(); }));
+    box.querySelectorAll("[data-stedit]").forEach(b => b.addEventListener("click", () => { st.edit = { ...st.courses[b.dataset.stedit] }; renderShortTerm(); }));
+    box.querySelectorAll("[data-stdates]").forEach(b => b.addEventListener("click", () => { const c = st.courses[b.dataset.stdates]; window.alert(`${c.name} · ${ST_SESSIONS}회 일정\n\n${stProgress(c).dates.map((d, i) => `${i + 1}회  ${d} (${"일월화수목금토"[toDate(d).getDay()]})`).join("\n")}\n\n공휴일·원 휴가·JP ONE 휴원일은 건너뛰었어요.`); }));
+    box.querySelectorAll("[data-stnext]").forEach(b => b.addEventListener("click", () => {
+      const c = st.courses[b.dataset.stnext], p = stProgress(c);
+      const after = p.end ? fmt(addDays(toDate(p.end), 7)) : fmt(startOfDay(new Date()));
+      st.edit = { next: true, name: c.name, age: c.age, phone: c.phone, day: c.day, time: c.time, classNo: c.classNo, teacher: c.teacher, startDate: after, amount: c.amount || Number(state.shortAmount) || 0, prevId: c.id };
+      renderShortTerm();
+    }));
+    // 수정·추가 창
+    on("stfCancel", "click", () => { st.edit = null; renderShortTerm(); });
+    on("stfSave", "click", async () => {
+      const v = (id) => (box.querySelector("#" + id)?.value || "").trim();
+      const e = st.edit, cls = v("stfClass");
+      const data = { name: v("stfName"), age: v("stfAge"), phone: v("stfPhone"), day: v("stfDay"), time: v("stfTime"), startDate: v("stfStart"), amount: Number(v("stfAmount")) || 0, memo: v("stfMemo"),
+        classNo: e.id && [e.classNo, e.teacher].filter(Boolean).join(" ") === cls ? (e.classNo || "") : cls, teacher: e.id && [e.classNo, e.teacher].filter(Boolean).join(" ") === cls ? (e.teacher || "") : "", updatedAt: Date.now() };
+      if (!data.name || !data.startDate) { showToast("이름과 첫 수업일은 꼭 적어 주세요"); return; }
+      if (e.id) { const stop = box.querySelector("#stfStop"); data.status = stop && stop.checked ? "stopped" : "active"; }
+      try {
+        if (e.id) await centerShortRef().doc(e.id).set(data, { merge: true });
+        else await centerShortRef().add({ ...data, sessions: ST_SESSIONS, paid: false, status: "active", source: e.next ? "next" : "manual", prevId: e.prevId || "", createdAt: Date.now(), createdBy: (fbAuth.currentUser && fbAuth.currentUser.email) || "" });
+        if (e.id && st.courses[e.id]?.paid) await stWriteLedger({ ...st.courses[e.id], ...data });
+        st.edit = null; showToast("저장했어요"); renderShortTerm();
+      } catch (err) { showToast("저장하지 못했어요 (" + ((err && err.code) || "") + ")"); }
+    });
+    on("stfDel", "click", async () => {
+      const e = st.edit; if (!e.id || !window.confirm(`${e.name} 단기 등록을 지울까요? (결제 전이라 장부에는 영향 없어요)${e.source === "schedule" ? "\n스케줄 매니저에 단기 등록이 남아 있으면 다시 자동으로 들어오지 않아요." : ""}`)) return;
+      try { if (e.source === "schedule") await centerShortRef().doc(e.id).set({ status: "stopped", deleted: true }, { merge: true }); else await centerShortRef().doc(e.id).delete(); st.edit = null; renderShortTerm(); }
+      catch (err) { showToast("지우지 못했어요"); }
+    });
+    // 결제 창
+    on("stpCancel", "click", () => { st.pay = null; renderShortTerm(); });
+    on("stpSave", "click", async () => {
+      const c = st.courses[st.pay];
+      const amount = Number(box.querySelector("#stpAmount").value) || 0, method = box.querySelector("#stpMethod").value, paidDate = box.querySelector("#stpDate").value;
+      if (!amount || !/^\d{4}-\d{2}-\d{2}$/.test(paidDate)) { showToast("금액과 결제일을 확인해 주세요"); return; }
+      const patch = { paid: true, amount, method, paidDate, paidBy: (fbAuth.currentUser && fbAuth.currentUser.email) || "", paidAt: Date.now() };
+      try {
+        const prev = c.paid ? { ...c } : null;
+        await centerShortRef().doc(c.id).set(patch, { merge: true });
+        await stWriteLedger({ ...c, ...patch }, prev);
+        st.pay = null; showToast(prev ? "결제를 고쳤어요" : "결제를 등록했어요. 매출 장부에 ‘단기’로 들어가요."); renderShortTerm();
+      } catch (err) { showToast("저장하지 못했어요 (" + ((err && err.code) || "") + ")"); }
+    });
+    on("stpUndo", "click", async () => {
+      const c = st.courses[st.pay];
+      if (!window.confirm(`${c.name} 단기 결제를 취소할까요?\n매출 장부의 이 기록도 지워져요(장부에서 고친 기록은 숨김 처리).`)) return;
+      try { await stRemoveLedger(c); await centerShortRef().doc(c.id).set({ paid: false, paidDate: "", method: "", paidAt: null }, { merge: true }); st.pay = null; showToast("결제를 취소했어요"); renderShortTerm(); }
+      catch (err) { showToast("취소하지 못했어요"); }
+    });
+  }
+  // 매출 장부: 결제일이 속한 주차에 '단기' 1건. 결제일을 바꾸면 예전 주차 기록은 지우고 새로 씀
+  function stLedgerId(c, paidDate) { return ledgerDocId(fmt(nextWeekRange(toDate(paidDate)).nextSaturday), "단기:" + c.id); }
+  async function stWriteLedger(c, prev) {
+    if (!c.paid || !c.paidDate) return;
+    const ref = centerLedgerRef(st.center || fbCenter);
+    if (prev && prev.paidDate && prev.paidDate !== c.paidDate) await stRemoveLedger(prev);
+    const week = fmt(nextWeekRange(toDate(c.paidDate)).nextSaturday);
+    const day = DAY_FULL[c.day] || c.day || "";
+    const row = ledgerRowData({ key: "단기:" + c.id, kind: "단기", category: "", day, name: c.name, age: c.age || "-", teacher: [c.classNo, c.teacher].filter(Boolean).join(" ") || "-",
+      time: c.time || "-", method: c.method || "카드", amount: c.amount, paidDate: c.paidDate, memo: c.memo || "", nextTerm: (() => { const d = stProgress(c).dates; return d.length ? `${fmtShort(d[0])}~${fmtShort(d[d.length - 1])}` : "-"; })() }, week);
+    await ref.doc(ledgerDocId(week, "단기:" + c.id)).set({ ...row, center: st.center || fbCenter, removed: false, updatedAt: Date.now() }, { merge: true });
+  }
+  async function stRemoveLedger(c) {
+    if (!c.paidDate) return;
+    const ref = centerLedgerRef(st.center || fbCenter).doc(stLedgerId(c, c.paidDate));
+    const snap = await ref.get();
+    if (!snap.exists) return;
+    if (ledgerHasManual(snap.data())) await ref.set({ removed: true }, { merge: true }); else await ref.delete();
   }
 
   function openLedgerModal() {
@@ -3146,6 +3462,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
           <input type="date" class="refdate" id="refDateInput" value="${fmt(state.refDate)}" title="기준일 (보통 오늘)" />
           <button class="btn" id="calendarOpenBtn">📅 학사달력</button>
           <button class="btn" id="ledgerOpenBtn">📒 매출 장부</button>
+          <button class="btn" id="shortTermOpenBtn">🏃 단기 수업</button>
           ${state.isAdmin ? `<button class="btn" id="cashCollectOpenBtn">💵 현금 수거</button>` : ``}
           <button class="btn primary" id="uploadBtn">⬆ 명단 업로드</button>
           ${state.activeDay ? `<button class="btn" id="captureBtn">📸 캡처</button><button class="btn" id="printBtn">🖨 인쇄</button>` : ``}
@@ -3400,6 +3717,8 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       const b = document.getElementById(id);
       if (b) b.addEventListener("click", openLedgerModal);
     });
+    const shortTermOpenBtn = document.getElementById("shortTermOpenBtn");
+    if (shortTermOpenBtn) shortTermOpenBtn.addEventListener("click", openShortTerm);
     const cashCollectOpenBtn = document.getElementById("cashCollectOpenBtn");
     if (cashCollectOpenBtn) cashCollectOpenBtn.addEventListener("click", openCashCollect);
 
@@ -4483,6 +4802,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       const data = doc.exists ? doc.data() : {};
       if (data.tuitionSettings) state.tuitionSettings = { ...DEFAULT_TUITION_SETTINGS, ...data.tuitionSettings };
       if (data.calendar) state.calendar = data.calendar;
+      state.shortAmount = Number(data.shortAmount) || 0; // 단기 수업 기본 금액
       if (data.smsSettings) state.smsSettings = data.smsSettings;
       state.autoReminder = { ...DEFAULT_AUTO_REMINDER, ...(data.autoReminder || {}) };
       state.autoReminderServer = data.autoReminderServer || null;
