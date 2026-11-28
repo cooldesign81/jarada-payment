@@ -1543,7 +1543,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   const stToday = () => fmt(startOfDay(new Date()));
   function centerShortRef(center) { return fbDb.collection("centers").doc(center || fbCenter).collection("shortterm"); }
   const st = { center: null, courses: {}, unsub: null, filter: "active", q: "", sched: null, schedUnsubs: [], schedState: "off", schedErr: "", closed: {}, edit: null, busy: false, imported: new Set(),
-    month: null, calOpen: true, sms: null };
+    month: null, calOpen: false, sms: null };
 
   function stApp(center) {
     const m = ST_SCHED[center]; if (!m) return null;
@@ -1705,7 +1705,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     box.innerHTML = `
       <div class="capture-actions" style="justify-content: space-between; align-items: center;">
         <div class="sms-title">🏃 단기 수업 결제</div>
-        <div style="display:flex; gap:8px; flex-wrap:wrap;"><button class="btn primary" id="stAddBtn">+ 직접 추가</button><button class="btn" id="stSmsBtn">💬 문자 보내기</button><button class="btn ghost" id="stCloseBtn">닫기</button></div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;"><button class="btn primary" id="stAddBtn">+ 직접 추가</button><button class="btn ${st.calOpen ? "primary" : ""}" id="stCalToggle">📅 달력</button><button class="btn" id="stSmsBtn">💬 문자 보내기</button><button class="btn ghost" id="stCloseBtn">닫기</button></div>
       </div>
       ${stCalendarHTML()}
       <div class="st-top">
@@ -1772,11 +1772,11 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       cells += `<div class="st-cal-d ${iso === today ? "today" : ""} ${blk ? "off" : ""}"><div class="st-cal-n" style="${w === 0 || blk ? "color:#b42318;" : w === 6 ? "color:#1968A1;" : ""}">${d}</div>
         ${blk ? `<div class="st-cal-h">${escapeHtml(blk)}</div>` : ""}<div class="st-cal-evs">${items.slice(0, 4).join("")}${items.length > 4 ? `<span class="st-sub">+${items.length - 4}</span>` : ""}</div></div>`;
     }
-    return `<div class="st-cal ${st.calOpen ? "" : "closed"}">
-      <div class="st-cal-head"><button class="btn ghost st-sm" id="stCalToggle">${st.calOpen ? "▾" : "▸"} 달력</button>
-        ${st.calOpen ? `<button class="btn ghost st-sm" id="stCalPrev">◀</button><b>${y}년 ${m}월</b><button class="btn ghost st-sm" id="stCalNext">▶</button><button class="btn ghost st-sm" id="stCalToday">이번 달</button>` : ""}
+    if (!st.calOpen) return "";
+    return `<div class="st-cal">
+      <div class="st-cal-head"><button class="btn ghost st-sm" id="stCalPrev">◀</button><b>${y}년 ${m}월</b><button class="btn ghost st-sm" id="stCalNext">▶</button><button class="btn ghost st-sm" id="stCalToday">이번 달</button>
         <span class="st-sub" style="margin-left:auto;"><span class="st-ev">이름 n</span> n회차 · <span class="st-ev last">마지막</span> · <span class="st-ev pay">💳 다음 결제일</span> · <b style="color:#b42318;">빨간 날</b> 쉬는 날</span>
-        <button class="btn st-sm" id="stCalLink">📅 학사달력 고치기</button></div>
+        <button class="btn st-sm" id="stCalLink">📅 학사달력 고치기</button><button class="btn ghost st-sm" id="stCalClose" title="달력 닫기">✕</button></div>
       ${st.calOpen ? `<div class="st-cal-grid">${["일", "월", "화", "수", "목", "금", "토"].map((w, i) => `<div class="st-cal-w" style="${i === 0 ? "color:#b42318;" : i === 6 ? "color:#1968A1;" : ""}">${w}</div>`).join("")}${cells}</div>` : ""}
     </div>`;
   }
@@ -1900,6 +1900,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     on("stSmsBtn", "click", stSmsOpen);
     on("stAddBtn", "click", () => { st.edit = { day: "월", sessions: ST_SESSIONS, extensions: 0, startDate: stToday() }; renderShortTerm(); });
     on("stCalToggle", "click", () => { st.calOpen = !st.calOpen; renderShortTerm(); });
+    on("stCalClose", "click", () => { st.calOpen = false; renderShortTerm(); });
     on("stCalPrev", "click", () => { const d = new Date(st.month + "-01T00:00:00"); d.setMonth(d.getMonth() - 1); st.month = fmt(d).slice(0, 7); renderShortTerm(); });
     on("stCalNext", "click", () => { const d = new Date(st.month + "-01T00:00:00"); d.setMonth(d.getMonth() + 1); st.month = fmt(d).slice(0, 7); renderShortTerm(); });
     on("stCalToday", "click", () => { st.month = stToday().slice(0, 7); renderShortTerm(); });
