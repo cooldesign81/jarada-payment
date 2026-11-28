@@ -374,6 +374,8 @@
   .lg-row .rq-tab { padding: 6px 12px; font-size: 12px; }
   .lg-sub { font-size: 12px; color: var(--ink-soft); }
   .lg-summary { display: flex; gap: 18px; flex-wrap: wrap; align-items: baseline; font-size: 13px; }
+    .lg-summary .lg-subtotal, .lg-table .lg-subtotal { color:#1E3A5F; font-weight:700; }
+    .lg-table th.lg-subtotal, .lg-table td.lg-subtotal { background:#f3f6fa; }
   .lg-summary b { font-family: var(--mono); }
   .lg-summary .lg-total b { font-size: 18px; color: var(--accent); }
   .lg-table { border: 1px solid var(--line); border-radius: 10px; max-height: 52vh; overflow: auto; }
@@ -690,6 +692,10 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   const CLASS_RE = /^(\d+)\s*번\(([^)]+)\)\s*\(([월화수목금토일])\s*-\s*(\d+)\s+(\d{1,2}:\d{2})\)/;
   // 결제방법 — 현영 = 현금영수증 발행. 합계·장부·엑셀 모두 이 순서로 나눠 보여 줌
   const PAY_METHODS = ["카드", "제로페이", "이체", "이체 현영", "현금", "현금 현영"];
+  // 매출 장부: 이체·현금은 현영 포함 합계도 봄 (필터 값 "이체+" = 이체 + 이체 현영)
+  const PAY_TOTALS = [["이체 합계", ["이체", "이체 현영"], "이체+"], ["현금 합계", ["현금", "현금 현영"], "현금+"]];
+  const payTotalOf = (by, ms) => ms.reduce((n, m) => n + ((by && by[m]) || 0), 0);
+  const methodMatches = (m, f) => { const t = PAY_TOTALS.find(x => x[2] === f); return t ? t[1].includes(m) : m === f; };
   function emptyByMethod() { return Object.fromEntries(PAY_METHODS.map(m => [m, 0])); }
   // 결제방법 선택칸. 결제 전이면서 아직 고르지 않은 칸만 비워 둠 (기본값 '카드'가 모든 줄에 찍혀 보이지 않게).
   // 비워 둘 때는 빈 첫 항목을 골라 둬서, 목록에서 '카드'를 골라도 바뀐 것으로 저장되게 함.
@@ -1408,7 +1414,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     const q = (lv.q || "").trim().toLowerCase();
     const kindFilter = lv.kind ? ledgerKindFilter(lv.kind) : null;
     return (lv.rows || []).filter(r => !r.removed &&
-      (!lv.method || ledgerMethod(r) === lv.method) &&
+      (!lv.method || methodMatches(ledgerMethod(r), lv.method)) &&
       (!kindFilter || kindFilter.kinds.includes(ledgerKindLabel(r))) &&
       (!lv.status || (lv.status === "edited" ? ledgerHasManual(r) : (r.status || "정상") === lv.status)) &&
       (!q || [r.name, r.memo, r.teacher, r.note].some(v => String(v || "").toLowerCase().includes(q)))
@@ -1513,6 +1519,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
           <select id="lgMethod" class="sms-input">
             <option value="">결제방법 전체</option>
             ${PAY_METHODS.map(m => `<option value="${m}" ${lv.method === m ? "selected" : ""}>${m}</option>`).join("")}
+            ${PAY_TOTALS.map(([label, ms, v]) => `<option value="${v}" ${lv.method === v ? "selected" : ""}>${label} (${ms.join(" + ")})</option>`).join("")}
           </select>
           <select id="lgKind" class="sms-input">
             <option value="">구분 전체</option>
@@ -1607,6 +1614,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         <span class="lg-total">합계 <b>${won(sum.total)}</b></span>
         <span>건수 <b>${sum.count.toLocaleString()}</b>건</span>
         ${PAY_METHODS.map(m => `<span>${m} <b>${won(sum.by[m])}</b></span>`).join("")}
+        ${PAY_TOTALS.map(([label, ms]) => `<span class="lg-subtotal" title="${ms.join(" + ")}">${label} <b>${won(payTotalOf(sum.by, ms))}</b></span>`).join("")}
       </div>
     `;
     if (!rows.length) {
@@ -1640,13 +1648,14 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       const showCenter = split && lv.group !== "center";
       const groups = groupLedgerRows(rows, lv.group, showCenter, true);
       html += `<div class="lg-table"><table>
-        <thead><tr><th>${LEDGER_GROUP_HEAD[lv.group]}</th>${showCenter ? `<th>원</th>` : ``}<th class="num">건수</th><th class="num">합계</th>${PAY_METHODS.map(m => `<th class="num">${m}</th>`).join("")}</tr></thead>
+        <thead><tr><th>${LEDGER_GROUP_HEAD[lv.group]}</th>${showCenter ? `<th>원</th>` : ``}<th class="num">건수</th><th class="num">합계</th>${PAY_METHODS.map(m => `<th class="num">${m}</th>`).join("")}${PAY_TOTALS.map(([label]) => `<th class="num lg-subtotal">${label}</th>`).join("")}</tr></thead>
         <tbody>${groups.map(g => `<tr>
           <td><b>${escapeHtml(ledgerGroupDisplay(lv.group, g.label))}</b></td>${showCenter ? `<td>${escapeHtml(g.center)}</td>` : ``}
           <td class="num">${g.count.toLocaleString()}</td><td class="num"><b>${won(g.total)}</b></td>
           ${PAY_METHODS.map(m => `<td class="num">${won(g.by[m])}</td>`).join("")}
+          ${PAY_TOTALS.map(([, ms]) => `<td class="num lg-subtotal">${won(payTotalOf(g.by, ms))}</td>`).join("")}
         </tr>`).join("")}
-        <tr class="lg-sum"><td>합계</td>${showCenter ? `<td></td>` : ``}<td class="num">${sum.count.toLocaleString()}</td><td class="num">${won(sum.total)}</td>${PAY_METHODS.map(m => `<td class="num">${won(sum.by[m])}</td>`).join("")}</tr>
+        <tr class="lg-sum"><td>합계</td>${showCenter ? `<td></td>` : ``}<td class="num">${sum.count.toLocaleString()}</td><td class="num">${won(sum.total)}</td>${PAY_METHODS.map(m => `<td class="num">${won(sum.by[m])}</td>`).join("")}${PAY_TOTALS.map(([, ms]) => `<td class="num lg-subtotal">${won(payTotalOf(sum.by, ms))}</td>`).join("")}</tr>
         </tbody></table></div>`;
     }
     el.innerHTML = html;
@@ -1800,10 +1809,10 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       const showCenter = split && group !== "center";
       const groups = groupLedgerRows(rows, group, showCenter, false);
       const total = sumLedger(rows);
-      const head = [LEDGER_GROUP_HEAD[group]].concat(showCenter ? ["원"] : [], ["건수", "합계"], PAY_METHODS);
-      const body = groups.map(g => [ledgerGroupDisplay(group, g.label)].concat(showCenter ? [g.center] : [], [g.count, g.total], PAY_METHODS.map(m => g.by[m] || 0)));
-      const foot = [["합계"].concat(showCenter ? [""] : [], [total.count, total.total], PAY_METHODS.map(m => total.by[m] || 0))];
-      addSheet(title, [head].concat(body, foot), [group === "week" ? 24 : 13].concat(showCenter ? [11] : [], [7, 12, 11, 11, 11, 11]));
+      const head = [LEDGER_GROUP_HEAD[group]].concat(showCenter ? ["원"] : [], ["건수", "합계"], PAY_METHODS, PAY_TOTALS.map(t => t[0]));
+      const body = groups.map(g => [ledgerGroupDisplay(group, g.label)].concat(showCenter ? [g.center] : [], [g.count, g.total], PAY_METHODS.map(m => g.by[m] || 0), PAY_TOTALS.map(t => payTotalOf(g.by, t[1]))));
+      const foot = [["합계"].concat(showCenter ? [""] : [], [total.count, total.total], PAY_METHODS.map(m => total.by[m] || 0), PAY_TOTALS.map(t => payTotalOf(total.by, t[1])))];
+      addSheet(title, [head].concat(body, foot), [group === "week" ? 24 : 13].concat(showCenter ? [11] : [], [7, 12], PAY_METHODS.map(() => 11), PAY_TOTALS.map(() => 12)));
     };
     groupSheet("month", "월별합계");
     groupSheet("week", "주별합계");
@@ -1816,7 +1825,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       ["항목", "값"],
       ["원", centers.join(", ")],
       ["기간", `${lv.from} ~ ${lv.to}`],
-      ["결제방법", lv.method || "전체"],
+      ["결제방법", (PAY_TOTALS.find(t => t[2] === lv.method) || [])[0] || lv.method || "전체"],
       ["구분", lv.kind ? ((ledgerKindFilter(lv.kind) || {}).label || lv.kind) : "전체"],
       ["상태", lv.status === "edited" ? "메모·수정한 기록만" : (lv.status || "전체")],
       ["검색", lv.q || "-"],
